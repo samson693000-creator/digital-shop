@@ -12,6 +12,13 @@
 <div class="flash">Сохранено.</div>
 {% endif %}
 
+{% if oauth_ok == 'ok' %}
+<div class="flash">OAuth-токен ЮMoney получен и сохранён. Можно проверять оплату в боте.</div>
+{% endif %}
+{% if oauth_err %}
+<div class="error">Не удалось получить токен: {{ oauth_err }}. Проверьте Client ID, Redirect URI = {{ yoomoney_redirect }}, и что code свежий (одноразовый).</div>
+{% endif %}
+
 <div class="panel">
   <h2>Бот</h2>
   <form method="post" action="/settings/bot">
@@ -25,6 +32,40 @@
     <label>Приветственный текст</label>
     <textarea name="welcome_text">{{ settings.get('welcome_text', '') }}</textarea>
     <button class="btn" type="submit">Сохранить бота</button>
+  </form>
+</div>
+
+<div class="panel" id="yoomoney-oauth">
+  <h2>Получить токен ЮMoney (OAuth)</h2>
+  <p style="color:var(--muted);font-size:0.85rem;">
+    Client ID — не токен. Ниже получим настоящий <b>access_token</b> для кнопки «Проверить оплату».
+  </p>
+  <ol style="color:var(--text);font-size:0.85rem;line-height:1.7;padding-left:1.2rem;">
+    <li>В приложении ЮMoney укажите Redirect URI: <code>{{ yoomoney_redirect }}</code></li>
+    <li>Вставьте Client ID и сохраните</li>
+    <li>Откройте ссылку «Разрешить доступ», войдите в ЮMoney</li>
+    <li>В адресной строке скопируйте <code>code=...</code> и вставьте ниже</li>
+  </ol>
+
+  <form method="post" action="/settings/yoomoney/save-client" style="margin-bottom:1rem;">
+    <label>Client ID</label>
+    <input name="client_id" value="{{ yoomoney_client_id }}" placeholder="ваш client_id" required />
+    <button class="btn" type="submit">Сохранить Client ID</button>
+  </form>
+
+  {% if yoomoney_auth_url %}
+  <p style="margin-bottom:1rem;">
+    <a class="btn" href="{{ yoomoney_auth_url }}" target="_blank" rel="noopener">1) Открыть — Разрешить доступ</a>
+  </p>
+  {% else %}
+  <p style="color:var(--muted);font-size:0.8rem;">Сначала сохраните Client ID — появится кнопка авторизации.</p>
+  {% endif %}
+
+  <form method="post" action="/settings/yoomoney/exchange">
+    <input type="hidden" name="client_id" value="{{ yoomoney_client_id }}" />
+    <label>2) Code из адресной строки (или вся ссылка)</label>
+    <input name="code" placeholder="code=XXXX или https://yoomoney.ru/?code=XXXX" required {% if not yoomoney_client_id %}disabled{% endif %} />
+    <button class="btn" type="submit" {% if not yoomoney_client_id %}disabled{% endif %}>Получить и сохранить токен</button>
   </form>
 </div>
 
@@ -49,21 +90,10 @@
       <div>
         <label>ЮMoney notification secret</label>
         <input name="yoomoney_secret" value="{{ pay.yoomoney_secret }}" />
-        <p style="color:var(--muted);font-size:0.7rem;margin-top:-0.5rem;">
-          Только для HTTP-уведомлений (автовыдача). Сам по себе кнопку «Проверить» не включает.
-        </p>
       </div>
     </div>
-    <label>ЮMoney OAuth token (нужен для «Проверить оплату» в боте)</label>
-    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" placeholder="длинный токен..." />
-    <p style="color:var(--muted);font-size:0.75rem;">
-      Создайте приложение: <a href="https://yoomoney.ru/myservices/new" target="_blank" rel="noopener">yoomoney.ru/myservices/new</a>
-      · права: <code>operation-history</code> · получите токен и вставьте сюда.<br>
-      Либо без токена: в разделе <b>Заказы</b> жмите «Подтвердить» вручную после оплаты.<br>
-      HTTP-уведомления (секрет): URL
-      <code>http://ВАШ_IP:8000/api/yoomoney/notify</code>
-      (лучше HTTPS-домен) в настройках кошелька ЮMoney.
-    </p>
+    <label>ЮMoney OAuth token (заполняется помощником выше)</label>
+    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" placeholder="появится после получения токена" />
     <label>Реферальный процент (%)</label>
     <input name="referral_percent" type="number" step="0.01" min="0" max="100" value="{{ pay.referral_percent }}" />
     <button class="btn" type="submit">Сохранить платежи</button>
