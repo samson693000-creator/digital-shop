@@ -27,7 +27,13 @@ curl -fsSL https://raw.githubusercontent.com/samson693000-creator/digital-shop/m
 
 После установки откройте админку → **Настройки** → вставьте `BOT_TOKEN` → `systemctl restart digital-shop`.
 
-Обновление:
+Обновление (уже установленный сервер):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samson693000-creator/digital-shop/main/update.sh | sudo bash
+```
+
+или локально:
 
 ```bash
 sudo bash /opt/digital-shop/update.sh

@@ -23,7 +23,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         public = (
             path.startswith("/static")
             or path in ("/login", "/api/yoomoney/notify")
-            or path == "/settings/yoomoney/callback"
         )
         if public:
             return await call_next(request)

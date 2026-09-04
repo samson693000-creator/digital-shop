@@ -9,7 +9,7 @@
 <div class="flash">Сохранено</div>
 {% endif %}
 {% if oauth_ok == 'ok' %}
-<div class="flash">✅ Токен ЮMoney получен и проверен</div>
+<div class="flash">✅ Токен ЮMoney получен и работает</div>
 {% elif oauth_ok %}
 <div class="flash">✅ {{ oauth_ok }}</div>
 {% endif %}
@@ -24,7 +24,7 @@
         <input name="bot_token" value="{{ settings.get('bot_token', '') }}" />
       </div>
       <div>
-        <label>ID админов (через запятую)</label>
+        <label>ID админов</label>
         <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" />
       </div>
     </div>
@@ -35,25 +35,23 @@
 </div>
 
 <div class="panel accent" id="ym">
-  <h2>ЮMoney — токен для проверки оплаты</h2>
+  <h2>ЮMoney — получить токен</h2>
   <p class="hint">
-    1) В <a href="https://yoomoney.ru/myservices" target="_blank" rel="noopener">приложении ЮMoney</a>
-    Redirect URI = <code class="mono" id="redir">{{ yoomoney_redirect }}</code>
-    <button class="btn btn-sm" type="button" id="copy-redir">копировать</button><br>
-    2) Client ID → «Получить токен» → войти / SMS → вас вернёт сюда автоматически.
+    Ошибка <b>invalid_request</b> бывает, если Redirect URI = http://IP — ЮMoney это запрещает.<br>
+    В приложении ЮMoney укажите Redirect URI <b>точно</b>:
+    <code id="redir">{{ yoomoney_redirect }}</code>
+    <button class="btn btn-sm" type="button" id="copy-redir">копировать</button>
   </p>
 
-  <div class="form-row">
+  <div class="form-row" style="margin-bottom:0.4rem">
     <div>
-      <label>Статус токена</label>
       {% if has_oauth_token %}
-      <div class="flash" style="margin:0">Есть · {{ pay.yoomoney_token|length }} симв.</div>
+      <div class="flash" style="margin:0">Токен есть · {{ pay.yoomoney_token|length }} симв.</div>
       {% else %}
-      <div class="error" style="margin:0">Нет токена</div>
+      <div class="error" style="margin:0">Токена нет</div>
       {% endif %}
     </div>
     <div>
-      <label>Проверка</label>
       <form method="post" action="/settings/yoomoney/test-token">
         <input type="hidden" name="yoomoney_token" value="" />
         <button class="btn" type="submit" style="width:100%">Проверить API</button>
@@ -61,35 +59,37 @@
     </div>
   </div>
 
-  <form method="post" action="/settings/yoomoney/prepare" style="margin-top:0.55rem">
-    <div class="form-row">
-      <div>
-        <label>Client ID</label>
-        <input name="client_id" value="{{ yoomoney_client_id }}" required placeholder="из приложения ЮMoney" />
-      </div>
-      <div>
-        <label>Адрес сервера</label>
-        <input name="public_base" value="{{ public_base }}" required />
-      </div>
-    </div>
+  <p class="hint"><b>Шаг A.</b> Client ID → открыть ЮMoney → войти / SMS</p>
+  <form method="post" action="/settings/yoomoney/prepare">
+    <label>Client ID</label>
+    <input name="client_id" value="{{ yoomoney_client_id }}" required />
     <div class="btn-row">
-      <button class="btn" type="submit" name="mode" value="go">Получить токен (открыть ЮMoney)</button>
-      <button class="btn" type="submit" name="mode" value="link">Только показать ссылку</button>
+      <button class="btn" type="submit" name="mode" value="go">A1) Открыть авторизацию</button>
+      <button class="btn" type="submit" name="mode" value="link">A2) Показать ссылку</button>
     </div>
   </form>
 
-  {% if yoomoney_auth_url and oauth_ready == '1' %}
-  <div style="margin-top:0.55rem">
-    <label>Ссылка (Chrome)</label>
-    <textarea id="oauth-url" class="sm mono" readonly>{{ yoomoney_auth_url }}</textarea>
-    <div class="btn-row">
-      <button class="btn" type="button" id="copy-oauth">Копировать</button>
-      <a class="btn" href="{{ yoomoney_auth_url }}" target="_blank" rel="noopener">Открыть</a>
-    </div>
+  {% if yoomoney_auth_url %}
+  <label>Ссылка авторизации</label>
+  <textarea id="oauth-url" class="sm mono" readonly>{{ yoomoney_auth_url }}</textarea>
+  <div class="btn-row">
+    <button class="btn" type="button" id="copy-oauth">Копировать ссылку</button>
+    <a class="btn" href="{{ yoomoney_auth_url }}" target="_blank" rel="noopener">Открыть ЮMoney</a>
   </div>
   {% endif %}
 
-  <form method="post" action="/settings/payments" style="margin-top:0.7rem">
+  <p class="hint" style="margin-top:0.7rem">
+    <b>Шаг B.</b> После входа вас кинет на yoomoney.ru — в адресной строке будет
+    <code>?code=....</code>. Скопируйте <b>всю ссылку</b> или только code и вставьте ниже.
+  </p>
+  <form method="post" action="/settings/yoomoney/exchange">
+    <input type="hidden" name="client_id" value="{{ yoomoney_client_id }}" />
+    <label>Ссылка с code= или сам code</label>
+    <textarea name="code" class="sm" required placeholder="https://yoomoney.ru/?code=XXXX  или  XXXX"></textarea>
+    <button class="btn" type="submit">B) Обменять code → токен</button>
+  </form>
+
+  <form method="post" action="/settings/payments" style="margin-top:1rem">
     <input type="hidden" name="usdt_trc20_wallet" value="{{ pay.usdt_trc20_wallet }}" />
     <input type="hidden" name="trongrid_api_key" value="{{ pay.trongrid_api_key }}" />
     <input type="hidden" name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" />
@@ -102,13 +102,13 @@
 </div>
 
 <div class="panel">
-  <h2>Кошельки / платежи</h2>
+  <h2>Кошельки</h2>
   <form method="post" action="/settings/payments">
     <input type="hidden" name="yoomoney_token" value="" />
     <div class="form-row">
       <div>
         <label>ЮMoney кошелёк</label>
-        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" placeholder="41001..." />
+        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" />
       </div>
       <div>
         <label>Notification secret</label>
@@ -128,26 +128,27 @@
     <div class="form-row">
       <div>
         <label>Реф. %</label>
-        <input name="referral_percent" type="number" step="0.01" min="0" max="100" value="{{ pay.referral_percent }}" />
+        <input name="referral_percent" type="number" step="0.01" value="{{ pay.referral_percent }}" />
       </div>
       <div>
-        <label>HTTP notify URL</label>
-        <input readonly value="{{ public_base }}/api/yoomoney/notify" />
+        <label>Адрес сервера (для notify)</label>
+        <input name="public_base" value="{{ public_base }}" />
       </div>
     </div>
-    <button class="btn" type="submit">Сохранить платежи</button>
+    <p class="hint mono">Notify: {{ public_base }}/api/yoomoney/notify</p>
+    <button class="btn" type="submit">Сохранить</button>
   </form>
 </div>
 
 <script>
 document.getElementById("copy-redir")?.addEventListener("click", async () => {
   const t = document.getElementById("redir").textContent.trim();
-  try { await navigator.clipboard.writeText(t); alert("Redirect URI скопирован"); } catch(e) {}
+  try { await navigator.clipboard.writeText(t); alert("Скопировано: " + t); } catch(e) {}
 });
 document.getElementById("copy-oauth")?.addEventListener("click", async () => {
   const t = document.getElementById("oauth-url");
   try { await navigator.clipboard.writeText(t.value); } catch(e) { t.select(); document.execCommand("copy"); }
-  alert("Ссылка скопирована — вставьте в Chrome");
+  alert("Ссылка скопирована");
 });
 </script>
 {% endblock %}

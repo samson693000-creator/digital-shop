@@ -7,17 +7,22 @@ import httpx
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import URLSafeSerializer
 
 from bot.services.payment_yoomoney import clean_oauth_token, validate_oauth_token
 from config import settings as app_settings
 from database import crud
 from database.database import async_session
+
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="web/templates")
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 DEFAULT_PUBLIC_BASE = "http://213.108.3.100:8000"
+
+# ЮMoney НЕ принимает http://IP — только HTTPS или их свой URI.
+# Рабочий вариант без домена:
+YOOMONEY_REDIRECT_URI = "https://yoomoney.ru"
 
 
 def _sync_env_bot_token(token: str) -> None:
@@ -45,20 +50,15 @@ def _public_base(stored: str, request: Request) -> str:
     base = (stored or "").strip().rstrip("/")
     if base:
         return base
-    # fallback from current request host
     return str(request.base_url).rstrip("/")
 
 
-def _callback_url(public_base: str) -> str:
-    return f"{public_base.rstrip('/')}/settings/yoomoney/callback"
-
-
-def _auth_url(client_id: str, redirect_uri: str, state: str) -> str:
+def _auth_url(client_id: str, state: str) -> str:
     q = urlencode(
         {
             "client_id": client_id,
             "response_type": "code",
-            "redirect_uri": redirect_uri,
+            "redirect_uri": YOOMONEY_REDIRECT_URI,
             "scope": "account-info operation-history",
             "state": state,
         }
@@ -66,7 +66,7 @@ def _auth_url(client_id: str, redirect_uri: str, state: str) -> str:
     return f"https://yoomoney.ru/oauth/authorize?{q}"
 
 
-async def _exchange_code(client_id: str, code: str, redirect_uri: str) -> tuple[str | None, str]:
+async def _exchange_code(client_id: str, code: str) -> tuple[str | None, str]:
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -75,7 +75,7 @@ async def _exchange_code(client_id: str, code: str, redirect_uri: str) -> tuple[
                     "code": code,
                     "client_id": client_id,
                     "grant_type": "authorization_code",
-                    "redirect_uri": redirect_uri,
+                    "redirect_uri": YOOMONEY_REDIRECT_URI,
                 },
             )
             data = resp.json()
@@ -89,6 +89,13 @@ async def _exchange_code(client_id: str, code: str, redirect_uri: str) -> tuple[
     return token, "ok"
 
 
+def _extract_code(raw: str) -> str:
+    raw = (raw or "").strip()
+    if "code=" in raw:
+        raw = raw.split("code=")[-1].split("&")[0].strip()
+    return raw
+
+
 @router.get("", response_class=HTMLResponse)
 async def settings_page(request: Request):
     async with async_session() as session:
@@ -98,11 +105,10 @@ async def settings_page(request: Request):
         public_base = await crud.get_setting(session, "public_base_url", DEFAULT_PUBLIC_BASE)
 
     public_base = _public_base(public_base, request)
-    redirect_uri = _callback_url(public_base)
     auth_url = ""
     if client_id:
         state = _state_serializer().dumps({"cid": client_id})
-        auth_url = _auth_url(client_id, redirect_uri, state)
+        auth_url = _auth_url(client_id, state)
 
     return templates.TemplateResponse(
         "settings.html",
@@ -113,7 +119,7 @@ async def settings_page(request: Request):
             "page": "settings",
             "yoomoney_client_id": client_id,
             "yoomoney_auth_url": auth_url,
-            "yoomoney_redirect": redirect_uri,
+            "yoomoney_redirect": YOOMONEY_REDIRECT_URI,
             "public_base": public_base,
             "oauth_ok": request.query_params.get("oauth"),
             "oauth_err": request.query_params.get("oauth_err"),
@@ -146,10 +152,12 @@ async def save_payment_settings(
     yoomoney_secret: str = Form(""),
     yoomoney_token: str = Form(""),
     referral_percent: float = Form(5.0),
+    public_base: str = Form(""),
 ):
     token = clean_oauth_token(yoomoney_token)
     async with async_session() as session:
-        # Don't wipe existing long token with empty/truncated field
+        if public_base.strip():
+            await crud.set_setting(session, "public_base_url", public_base.strip().rstrip("/"))
         if not token:
             pay = await crud.get_payment_settings(session)
             token = clean_oauth_token(pay.yoomoney_token or "")
@@ -178,59 +186,57 @@ async def test_yoomoney_token(yoomoney_token: str = Form("")):
 @router.post("/yoomoney/prepare")
 async def prepare_yoomoney_oauth(
     client_id: str = Form(...),
-    public_base: str = Form(DEFAULT_PUBLIC_BASE),
     mode: str = Form("link"),
 ):
     cid = client_id.strip()
-    base = public_base.strip().rstrip("/") or DEFAULT_PUBLIC_BASE
     async with async_session() as session:
         await crud.set_setting(session, "yoomoney_client_id", cid)
-        await crud.set_setting(session, "public_base_url", base)
 
-    redirect_uri = _callback_url(base)
     state = _state_serializer().dumps({"cid": cid})
-    auth = _auth_url(cid, redirect_uri, state)
-
-    # Direct redirect into YooMoney (best in Chrome)
+    auth = _auth_url(cid, state)
     if mode == "go":
         return RedirectResponse(auth, status_code=302)
     return RedirectResponse("/settings?oauth_ready=1#ym", status_code=302)
 
 
-@router.get("/yoomoney/callback")
-async def yoomoney_oauth_callback(
-    request: Request,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+@router.post("/yoomoney/exchange")
+async def exchange_yoomoney_code(
+    client_id: str = Form(""),
+    code: str = Form(...),
 ):
-    if error:
-        return RedirectResponse("/settings?oauth_err=" + quote(error[:80]) + "#ym", status_code=302)
-    if not code or not state:
-        return RedirectResponse("/settings?oauth_err=" + quote("no_code") + "#ym", status_code=302)
-
-    try:
-        payload = _state_serializer().loads(state)
-        client_id = payload.get("cid") or ""
-    except BadSignature:
-        return RedirectResponse("/settings?oauth_err=" + quote("bad_state") + "#ym", status_code=302)
-
+    """Paste code or full https://yoomoney.ru/?code=... URL after authorize."""
     async with async_session() as session:
-        public_base = await crud.get_setting(session, "public_base_url", DEFAULT_PUBLIC_BASE)
-    redirect_uri = _callback_url(_public_base(public_base, request))
+        stored_cid = await crud.get_setting(session, "yoomoney_client_id", "")
+    cid = (client_id or stored_cid).strip()
+    if not cid:
+        return RedirectResponse(
+            "/settings?oauth_err=" + quote("Сначала укажите Client ID") + "#ym",
+            status_code=302,
+        )
 
-    token, status = await _exchange_code(client_id, code.strip(), redirect_uri)
+    raw_code = _extract_code(code)
+    if not raw_code:
+        return RedirectResponse(
+            "/settings?oauth_err=" + quote("Пустой code") + "#ym",
+            status_code=302,
+        )
+
+    token, status = await _exchange_code(cid, raw_code)
     if not token:
-        return RedirectResponse("/settings?oauth_err=" + quote(status[:80]) + "#ym", status_code=302)
+        return RedirectResponse(
+            "/settings?oauth_err=" + quote(status[:100]) + "#ym",
+            status_code=302,
+        )
 
     token = clean_oauth_token(token)
     ok, msg = await validate_oauth_token(token)
     async with async_session() as session:
+        await crud.set_setting(session, "yoomoney_client_id", cid)
         await crud.update_payment_settings(session, yoomoney_token=token)
 
     if ok:
         return RedirectResponse("/settings?oauth=ok#ym", status_code=302)
     return RedirectResponse(
-        "/settings?oauth_err=" + quote("Токен сохранён, но проверка: " + msg[:80]) + "#ym",
+        "/settings?oauth_err=" + quote("Сохранён, проверка: " + msg[:80]) + "#ym",
         status_code=302,
     )

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Быстрый апдейт уже установленного Digital Shop
+#   curl -fsSL https://raw.githubusercontent.com/samson693000-creator/digital-shop/main/update.sh | sudo bash
 set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/opt/digital-shop}"
 SERVICE_NAME="digital-shop"
