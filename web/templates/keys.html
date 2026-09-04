@@ -1,32 +1,60 @@
 {% extends "base.html" %}
-{% block title %}Ключи{% endblock %}
+{% block title %}Выдача{% endblock %}
 {% block content %}
-<h1 class="page-title">Ключи · {{ product.name }}</h1>
+<h1 class="page-title">Выдача · {{ product.name }}</h1>
 <p style="color:var(--muted);margin-top:-0.75rem;margin-bottom:1.25rem;">
-  В наличии: {{ available|length }} · Продано: {{ sold|length }}
+  В наличии: {{ available|length }} · Уже выдано: {{ sold|length }}
 </p>
 
+{% if is_new %}
+<div class="flash">Товар создан. Добавьте ниже, что получит покупатель после оплаты.</div>
+{% endif %}
+
 <div class="panel">
-  <h2>Загрузить ключи</h2>
-  <p style="color:var(--muted);font-size:0.8rem;">Один ключ / ссылка / текст на строку.</p>
+  <h2>Что получит покупатель</h2>
+  <p style="color:var(--muted);font-size:0.8rem;">
+    Один ключ / логин:пароль / ссылка / любой текст — на строку. При покупке уходит случайная свободная строка.
+  </p>
   <form method="post" action="/products/{{ product.id }}/keys">
-    <textarea name="keys_text" placeholder="KEY-AAAA&#10;KEY-BBBB&#10;https://example.com/file"></textarea>
-    <button class="btn" type="submit">Загрузить</button>
-    <a class="btn" href="/products" style="margin-left:0.5rem;">Назад</a>
+    <textarea name="keys_text" placeholder="login:password&#10;KEY-1111&#10;https://disk.example/file" required></textarea>
+    <button class="btn" type="submit">Добавить в выдачу</button>
+    <a class="btn" href="/products" style="margin-left:0.5rem;">К списку товаров</a>
   </form>
 </div>
 
 <div class="panel">
-  <h2>Доступные</h2>
+  <h2>Свободные (ещё не проданы)</h2>
   <table>
-    <thead><tr><th>ID</th><th>Контент</th></tr></thead>
+    <thead><tr><th>ID</th><th>Контент</th><th></th></tr></thead>
     <tbody>
       {% for k in available %}
-      <tr><td>{{ k.id }}</td><td><code>{{ k.content }}</code></td></tr>
+      <tr>
+        <td>{{ k.id }}</td>
+        <td><code>{{ k.content }}</code></td>
+        <td>
+          <form class="inline" method="post" action="/products/{{ product.id }}/keys/{{ k.id }}/delete" onsubmit="return confirm('Удалить эту позицию?')">
+            <button class="btn btn-sm btn-danger" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>
       {% else %}
-      <tr><td colspan="2">Пусто</td></tr>
+      <tr><td colspan="3">Пусто — добавьте выдачу выше</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+
+{% if sold %}
+<div class="panel">
+  <h2>Уже выдано</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Контент</th></tr></thead>
+    <tbody>
+      {% for k in sold %}
+      <tr><td>{{ k.id }}</td><td><code>{{ k.content }}</code></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -236,6 +236,7 @@ async def create_product(
     name: str,
     price: Decimal,
     description: str | None = None,
+    keys: list[str] | None = None,
 ) -> Product:
     product = Product(
         category_id=category_id,
@@ -244,6 +245,12 @@ async def create_product(
         description=description,
     )
     session.add(product)
+    await session.flush()
+    if keys:
+        for content in keys:
+            content = content.strip()
+            if content:
+                session.add(ProductKey(product_id=product.id, content=content))
     await session.commit()
     await session.refresh(product)
     return product
@@ -262,9 +269,34 @@ async def update_product(session: AsyncSession, product_id: int, **kwargs) -> Pr
 
 
 async def delete_product(session: AsyncSession, product_id: int) -> bool:
+    """Hard-delete product with related keys/orders (avoids FK 500)."""
     product = await session.get(Product, product_id)
     if not product:
         return False
+
+    order_ids = list(
+        (
+            await session.execute(
+                select(Order.id).where(Order.product_id == product_id)
+            )
+        ).scalars().all()
+    )
+    if order_ids:
+        await session.execute(
+            delete(ReferralEarning).where(ReferralEarning.order_id.in_(order_ids))
+        )
+
+    await session.execute(
+        update(ProductKey)
+        .where(ProductKey.product_id == product_id)
+        .values(order_id=None)
+    )
+    await session.execute(
+        delete(ProductKey).where(ProductKey.product_id == product_id)
+    )
+    if order_ids:
+        await session.execute(delete(Order).where(Order.product_id == product_id))
+
     await session.delete(product)
     await session.commit()
     return True

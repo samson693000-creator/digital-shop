@@ -3,21 +3,34 @@
 {% block content %}
 <h1 class="page-title">Товары</h1>
 
+{% if flash == 'deleted' %}
+<div class="flash">Товар удалён.</div>
+{% elif flash and flash.startswith('created_') %}
+<div class="flash">Товар создан, позиций для выдачи: {{ flash.split('_')[1] }}.</div>
+{% endif %}
+{% if error == 'delete_failed' %}
+<div class="error">Не удалось удалить товар. Попробуйте ещё раз.</div>
+{% elif error == 'not_found' %}
+<div class="error">Товар не найден.</div>
+{% endif %}
+
 <div class="panel">
   <h2>Добавить товар</h2>
   <form method="post" action="/products/create">
     <div class="form-row">
       <div>
         <label>Название</label>
-        <input name="name" required />
+        <input name="name" required placeholder="Spotify Premium 1 мес." />
       </div>
       <div>
         <label>Категория</label>
-        <select name="category_id" required>
+        <select name="category_id" required {% if not categories %}disabled{% endif %}>
           {% for c in categories %}
           <option value="{{ c.id }}">
             {% if c.parent_id %}↳ {% endif %}{{ c.name }}
           </option>
+          {% else %}
+          <option value="">Сначала создайте категорию</option>
           {% endfor %}
         </select>
       </div>
@@ -28,11 +41,16 @@
         <input name="price" type="number" step="0.01" min="0" required />
       </div>
       <div>
-        <label>Описание</label>
-        <input name="description" />
+        <label>Описание (видит покупатель в боте)</label>
+        <input name="description" placeholder="Кратко, что это за товар" />
       </div>
     </div>
-    <button class="btn" type="submit">Создать</button>
+    <label>Что получит покупатель после оплаты</label>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:-0.25rem;">
+      Один ключ / логин / ссылка / текст — на строку. Каждая строка = 1 продажа.
+    </p>
+    <textarea name="keys_text" placeholder="login:pass&#10;KEY-AAAA-BBBB&#10;https://example.com/file.zip"></textarea>
+    <button class="btn" type="submit" {% if not categories %}disabled{% endif %}>Создать товар</button>
   </form>
 </div>
 
@@ -45,7 +63,7 @@
         <th>Название</th>
         <th>Категория</th>
         <th>Цена</th>
-        <th>Ключи</th>
+        <th>Остаток</th>
         <th>Активен</th>
         <th></th>
       </tr>
@@ -60,14 +78,14 @@
         <td>{{ p.available_count }} / {{ p.keys|length }}</td>
         <td>{{ "да" if p.is_active else "нет" }}</td>
         <td>
-          <a class="btn btn-sm" href="/products/{{ p.id }}/keys">Ключи</a>
-          <form class="inline" method="post" action="/products/{{ p.id }}/delete" onsubmit="return confirm('Удалить товар?')">
+          <a class="btn btn-sm" href="/products/{{ p.id }}/keys">Выдача</a>
+          <form class="inline" method="post" action="/products/{{ p.id }}/delete" onsubmit="return confirm('Удалить товар и связанные заказы?')">
             <button class="btn btn-sm btn-danger" type="submit">Удалить</button>
           </form>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7">Нет товаров. Сначала создайте категорию.</td></tr>
+      <tr><td colspan="7">Нет товаров. Сначала создайте категорию, затем товар.</td></tr>
       {% endfor %}
     </tbody>
   </table>

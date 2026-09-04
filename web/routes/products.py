@@ -6,9 +6,18 @@ from fastapi.templating import Jinja2Templates
 
 from database import crud
 from database.database import async_session
+from database.models import ProductKey
 
 router = APIRouter(prefix="/products")
 templates = Jinja2Templates(directory="web/templates")
+
+
+def _split_keys(keys_text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in keys_text.replace("\r", "").split("\n")
+        if line.strip()
+    ]
 
 
 @router.get("", response_class=HTMLResponse)
@@ -23,6 +32,8 @@ async def products_page(request: Request):
             "products": products,
             "categories": categories,
             "page": "products",
+            "flash": request.query_params.get("ok"),
+            "error": request.query_params.get("err"),
         },
     )
 
@@ -33,16 +44,22 @@ async def create_product(
     category_id: int = Form(...),
     price: float = Form(...),
     description: str = Form(""),
+    keys_text: str = Form(""),
 ):
+    keys = _split_keys(keys_text)
     async with async_session() as session:
-        await crud.create_product(
+        product = await crud.create_product(
             session,
             category_id=category_id,
             name=name.strip(),
             price=Decimal(str(price)),
             description=description.strip() or None,
+            keys=keys,
         )
-    return RedirectResponse("/products", status_code=302)
+        pid = product.id
+    if keys:
+        return RedirectResponse(f"/products?ok=created_{len(keys)}", status_code=302)
+    return RedirectResponse(f"/products/{pid}/keys?new=1", status_code=302)
 
 
 @router.post("/{product_id}/update")
@@ -69,9 +86,14 @@ async def update_product(
 
 @router.post("/{product_id}/delete")
 async def delete_product(product_id: int):
-    async with async_session() as session:
-        await crud.delete_product(session, product_id)
-    return RedirectResponse("/products", status_code=302)
+    try:
+        async with async_session() as session:
+            ok = await crud.delete_product(session, product_id)
+        if not ok:
+            return RedirectResponse("/products?err=not_found", status_code=302)
+        return RedirectResponse("/products?ok=deleted", status_code=302)
+    except Exception:
+        return RedirectResponse("/products?err=delete_failed", status_code=302)
 
 
 @router.get("/{product_id}/keys", response_class=HTMLResponse)
@@ -90,19 +112,29 @@ async def keys_page(request: Request, product_id: int):
             "available": available,
             "sold": sold,
             "page": "products",
+            "is_new": request.query_params.get("new") == "1",
         },
     )
 
 
 @router.post("/{product_id}/keys")
 async def add_keys(product_id: int, keys_text: str = Form(...)):
-    lines = keys_text.replace("\r", "").split("\n")
+    lines = _split_keys(keys_text)
     async with async_session() as session:
         await crud.add_keys(session, product_id, lines)
     return RedirectResponse(f"/products/{product_id}/keys", status_code=302)
 
 
-# Categories
+@router.post("/{product_id}/keys/{key_id}/delete")
+async def delete_key(product_id: int, key_id: int):
+    async with async_session() as session:
+        key = await session.get(ProductKey, key_id)
+        if key and key.product_id == product_id and not key.is_sold:
+            await session.delete(key)
+            await session.commit()
+    return RedirectResponse(f"/products/{product_id}/keys", status_code=302)
+
+
 @router.get("/categories/manage", response_class=HTMLResponse)
 async def categories_page(request: Request):
     async with async_session() as session:
