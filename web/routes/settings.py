@@ -9,10 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
+from bot.services.payment_yoomoney import clean_oauth_token, validate_oauth_token
 from config import settings as app_settings
 from database import crud
 from database.database import async_session
-
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="web/templates")
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -147,18 +147,32 @@ async def save_payment_settings(
     yoomoney_token: str = Form(""),
     referral_percent: float = Form(5.0),
 ):
+    token = clean_oauth_token(yoomoney_token)
     async with async_session() as session:
+        # Don't wipe existing long token with empty/truncated field
+        if not token:
+            pay = await crud.get_payment_settings(session)
+            token = clean_oauth_token(pay.yoomoney_token or "")
         await crud.update_payment_settings(
             session,
             usdt_trc20_wallet=usdt_trc20_wallet.strip(),
             trongrid_api_key=trongrid_api_key.strip(),
             yoomoney_wallet=yoomoney_wallet.strip(),
             yoomoney_secret=yoomoney_secret.strip(),
-            yoomoney_token=yoomoney_token.strip(),
+            yoomoney_token=token,
             referral_percent=referral_percent,
         )
     return RedirectResponse("/settings?saved=pay", status_code=302)
 
+
+@router.post("/yoomoney/test-token")
+async def test_yoomoney_token(yoomoney_token: str = Form("")):
+    async with async_session() as session:
+        pay = await crud.get_payment_settings(session)
+        token = clean_oauth_token(yoomoney_token) or clean_oauth_token(pay.yoomoney_token or "")
+    ok, msg = await validate_oauth_token(token)
+    key = "oauth_ok" if ok else "oauth_err"
+    return RedirectResponse(f"/settings?{key}=" + quote(msg[:120]) + "#yoomoney-oauth", status_code=302)
 
 @router.post("/yoomoney/prepare")
 async def prepare_yoomoney_oauth(
@@ -214,6 +228,6 @@ async def yoomoney_oauth_callback(
         )
 
     async with async_session() as session:
-        await crud.update_payment_settings(session, yoomoney_token=token)
+        await crud.update_payment_settings(session, yoomoney_token=clean_oauth_token(token))
 
     return RedirectResponse("/settings?oauth=ok#yoomoney-oauth", status_code=302)

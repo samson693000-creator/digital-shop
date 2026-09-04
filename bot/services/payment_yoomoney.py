@@ -16,6 +16,14 @@ def make_label() -> str:
     return secrets.token_hex(8)
 
 
+def clean_oauth_token(token: str) -> str:
+    t = (token or "").strip().strip('"').strip("'")
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    # remove accidental whitespace/newlines from copy-paste
+    return "".join(t.split())
+
+
 def build_quickpay_url(
     wallet: str,
     amount: Decimal,
@@ -23,10 +31,6 @@ def build_quickpay_url(
     success_url: str = "",
     payment_type: str = "AC",
 ) -> str:
-    """
-    YooMoney QuickPay link.
-    payment_type: AC = карта, PC = кошелёк ЮMoney.
-    """
     params = {
         "receiver": wallet,
         "quickpay-form": "button",
@@ -57,27 +61,52 @@ def verify_notification(data: dict, notification_secret: str) -> bool:
     return digest == data.get("sha1_hash", "")
 
 
+async def validate_oauth_token(token: str) -> tuple[bool, str]:
+    """Call account-info to verify token. Returns (ok, message)."""
+    token = clean_oauth_token(token)
+    if not token:
+        return False, "Токен пустой"
+    if len(token) < 40:
+        return False, f"Токен слишком короткий ({len(token)} симв.) — похоже, вставлен не access_token"
+
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(
+                "https://yoomoney.ru/api/account-info",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            body = resp.text[:300]
+            if resp.status_code == 401:
+                return False, "401 — токен неверный или отозван. Получите заново через OAuth."
+            if resp.status_code == 403:
+                return False, "403 — нет прав. При авторизации нужны account-info и operation-history."
+            if resp.status_code >= 400:
+                return False, f"HTTP {resp.status_code}: {body}"
+            data = resp.json()
+    except Exception as exc:
+        return False, f"Сеть: {exc}"
+
+    if data.get("error"):
+        return False, f"Ошибка API: {data.get('error')}"
+
+    account = data.get("account") or data.get("account_number") or "?"
+    return True, f"OK · кошелёк API: {account} · длина токена: {len(token)}"
+
+
 async def check_operation_by_label(
     token: str,
     label: str,
     expected_amount: Decimal,
 ) -> tuple[bool, str]:
-    """
-    Check incoming payment via YooMoney OAuth API (operation-history).
-    Returns (paid, reason_code).
-    """
+    token = clean_oauth_token(token)
     if not token:
         return False, "no_oauth_token"
     if not label:
         return False, "no_label"
 
     url = "https://yoomoney.ru/api/operation-history"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-    # Without type filter — label can be on incoming-transfer / deposition
-    payload = {"label": label, "records": 30}
+    headers = {"Authorization": f"Bearer {token}"}
+    payload = {"label": label, "records": 50}
 
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
@@ -101,15 +130,35 @@ async def check_operation_by_label(
         if op_label != label:
             continue
         status = op.get("status")
-        # success / in_progress — для входящих часто success
         if status not in (None, "success", "done"):
             continue
         try:
             amount = Decimal(str(op.get("amount", 0)))
         except Exception:
             continue
-        # допускаем небольшую погрешность
         if amount + Decimal("0.01") >= expected_amount:
             return True, "ok"
+
+    # Fallback: recent incoming with same amount (label sometimes missing)
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(
+                url,
+                headers=headers,
+                data={"records": 20, "type": "deposition"},
+            )
+            if resp.status_code == 200:
+                data2 = resp.json()
+                for op in data2.get("operations", []):
+                    try:
+                        amount = Decimal(str(op.get("amount", 0)))
+                    except Exception:
+                        continue
+                    if abs(amount - expected_amount) <= Decimal("0.01"):
+                        op_label = str(op.get("label") or "")
+                        if not op_label or op_label == label:
+                            return True, "ok_amount"
+    except Exception:
+        pass
 
     return False, "not_found"

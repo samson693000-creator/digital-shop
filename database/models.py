@@ -160,10 +160,10 @@ class PaymentSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     usdt_trc20_wallet: Mapped[str] = mapped_column(String(128), default="")
-    trongrid_api_key: Mapped[str] = mapped_column(String(255), default="")
+    trongrid_api_key: Mapped[str] = mapped_column(Text, default="")
     yoomoney_wallet: Mapped[str] = mapped_column(String(64), default="")
-    yoomoney_secret: Mapped[str] = mapped_column(String(255), default="")
-    yoomoney_token: Mapped[str] = mapped_column(String(255), default="")
+    yoomoney_secret: Mapped[str] = mapped_column(Text, default="")
+    yoomoney_token: Mapped[str] = mapped_column(Text, default="")
     referral_percent: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), default=Decimal("5.00")
     )
