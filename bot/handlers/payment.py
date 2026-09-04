@@ -116,7 +116,9 @@ async def pay_yoomoney(callback: CallbackQuery):
 
         label = make_label()
         amount = Decimal(str(order.amount))
-        url = build_quickpay_url(pay.yoomoney_wallet, amount, label)
+        # Две ссылки: карта и кошелёк — label одинаковый
+        url_card = build_quickpay_url(pay.yoomoney_wallet, amount, label, payment_type="AC")
+        url_wallet = build_quickpay_url(pay.yoomoney_wallet, amount, label, payment_type="PC")
         order.payment_method = "yoomoney"
         order.payment_memo = label
         order.external_id = label
@@ -128,10 +130,12 @@ async def pay_yoomoney(callback: CallbackQuery):
         f"💰 <b>Оплата ЮMoney</b>\n"
         f"Заказ #{order_id}\n\n"
         f"Сумма: <b>{amount:.2f} ₽</b>\n"
-        f"Метка платежа: <code>{label}</code>\n\n"
-        f"Оплатить: {url}\n\n"
-        f"После оплаты нажмите «Проверить оплату» "
-        f"(или дождитесь автоуведомления).",
+        f"Метка: <code>{label}</code>\n\n"
+        f"💳 Картой: {url_card}\n"
+        f"👛 Кошелёк ЮMoney: {url_wallet}\n\n"
+        f"После оплаты нажмите «Проверить оплату».\n"
+        f"<i>Для авто-проверки в админке нужен OAuth-токен ЮMoney "
+        f"(не путать с notification secret).</i>",
         reply_markup=check_payment_kb(order_id),
         disable_web_page_preview=True,
     )
@@ -202,11 +206,29 @@ async def check_payment(callback: CallbackQuery):
                 min_timestamp_ms=ts,
             )
         elif order.payment_method == "yoomoney":
-            paid = await check_operation_by_label(
+            paid, reason = await check_operation_by_label(
                 token=pay.yoomoney_token or "",
                 label=order.external_id or "",
                 expected_amount=Decimal(str(order.amount)),
             )
+            if not paid:
+                hints = {
+                    "no_oauth_token": (
+                        "В админке не указан OAuth-токен ЮMoney "
+                        "(нужен для кнопки «Проверить»). "
+                        "Секрет уведомлений сам по себе не проверяет оплату. "
+                        "Либо подтвердите заказ вручную в разделе Заказы."
+                    ),
+                    "oauth_unauthorized": "OAuth-токен ЮMoney неверный. Обновите в настройках.",
+                    "oauth_forbidden": "У OAuth-токена нет права operation-history.",
+                    "not_found": "Платёж с этой меткой пока не найден в истории ЮMoney. Подождите 1–2 мин.",
+                    "api_error": "Ошибка запроса к API ЮMoney. Попробуйте позже.",
+                }
+                await callback.answer(
+                    hints.get(reason, f"Оплата не найдена ({reason})"),
+                    show_alert=True,
+                )
+                return
 
         if not paid:
             await callback.answer("Оплата пока не найдена. Подождите и повторите.", show_alert=True)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -18,8 +18,50 @@ async def orders_page(request: Request):
         stats = await crud.get_stats(session)
     return templates.TemplateResponse(
         "orders.html",
-        {"request": request, "orders": orders, "stats": stats, "page": "orders"},
+        {
+            "request": request,
+            "orders": orders,
+            "stats": stats,
+            "page": "orders",
+            "flash": request.query_params.get("ok"),
+            "error": request.query_params.get("err"),
+        },
     )
+
+
+@router.post("/orders/{order_id}/confirm")
+async def confirm_order(order_id: int):
+    """Ручное подтверждение оплаты админом + выдача товара."""
+    async with async_session() as session:
+        order = await crud.get_order(session, order_id)
+        if not order:
+            return RedirectResponse("/orders?err=not_found", status_code=302)
+        if order.status == "paid":
+            return RedirectResponse("/orders?ok=already", status_code=302)
+        if order.status != "pending":
+            return RedirectResponse("/orders?err=closed", status_code=302)
+
+        from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.enums import ParseMode
+
+        token = await crud.get_setting(session, "bot_token", "")
+        if token:
+            bot = Bot(
+                token=token,
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            )
+            try:
+                ok = await deliver_order(session, bot, order_id)
+            finally:
+                await bot.session.close()
+        else:
+            completed = await crud.complete_order(session, order_id)
+            ok = bool(completed and completed.status == "paid")
+
+    if ok:
+        return RedirectResponse("/orders?ok=confirmed", status_code=302)
+    return RedirectResponse("/orders?err=deliver", status_code=302)
 
 
 @router.get("/users", response_class=HTMLResponse)
@@ -35,7 +77,7 @@ async def users_page(request: Request):
 @router.post("/api/yoomoney/notify")
 async def yoomoney_notify(request: Request):
     """Public webhook for YooMoney HTTP notifications."""
-    form = dict(await request.form())
+    form = {k: str(v) for k, v in (await request.form()).items()}
     async with async_session() as session:
         pay = await crud.get_payment_settings(session)
         if not pay.yoomoney_secret or not verify_notification(form, pay.yoomoney_secret):
@@ -47,14 +89,16 @@ async def yoomoney_notify(request: Request):
         if not order:
             return HTMLResponse("ok")
 
-        # Need bot instance — delivery message best-effort via token
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode
 
         token = await crud.get_setting(session, "bot_token", "")
         if token:
-            bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            bot = Bot(
+                token=token,
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            )
             try:
                 await deliver_order(session, bot, order.id)
             finally:

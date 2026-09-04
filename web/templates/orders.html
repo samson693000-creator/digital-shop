@@ -3,6 +3,17 @@
 {% block content %}
 <h1 class="page-title">Заказы</h1>
 
+{% if flash == 'confirmed' %}
+<div class="flash">Оплата подтверждена, товар выдан в Telegram.</div>
+{% elif flash == 'already' %}
+<div class="flash">Заказ уже был оплачен.</div>
+{% endif %}
+{% if error == 'deliver' %}
+<div class="error">Не удалось выдать (нет ключей или ошибка). Проверьте остаток товара.</div>
+{% elif error %}
+<div class="error">Ошибка: {{ error }}</div>
+{% endif %}
+
 <div class="grid-stats">
   <div class="stat">
     <div class="label">Доход</div>
@@ -23,9 +34,10 @@
         <th>Товар</th>
         <th>Сумма</th>
         <th>Метод</th>
+        <th>Метка</th>
         <th>Статус</th>
         <th>Выдано</th>
-        <th>Дата</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -36,12 +48,19 @@
         <td>{{ o.product.name if o.product else "—" }}</td>
         <td>{{ o.amount }}</td>
         <td>{{ o.payment_method }}</td>
+        <td>{% if o.external_id %}<code>{{ o.external_id }}</code>{% else %}—{% endif %}</td>
         <td><span class="badge {{ o.status }}">{{ o.status }}</span></td>
         <td>{% if o.delivered_content %}<code>{{ o.delivered_content[:40] }}{% if o.delivered_content|length > 40 %}…{% endif %}</code>{% else %}—{% endif %}</td>
-        <td>{{ o.created_at }}</td>
+        <td>
+          {% if o.status == 'pending' %}
+          <form class="inline" method="post" action="/orders/{{ o.id }}/confirm" onsubmit="return confirm('Деньги пришли? Выдать товар покупателю?')">
+            <button class="btn btn-sm" type="submit">Подтвердить</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="8">Пусто</td></tr>
+      <tr><td colspan="9">Пусто</td></tr>
       {% endfor %}
     </tbody>
   </table>

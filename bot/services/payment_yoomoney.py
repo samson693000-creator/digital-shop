@@ -1,12 +1,15 @@
-"""YooMoney payment helpers (P2P / quickpay)."""
+"""YooMoney payment helpers (QuickPay + API + webhook)."""
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from decimal import Decimal
 from urllib.parse import urlencode
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 def make_label() -> str:
@@ -18,29 +21,26 @@ def build_quickpay_url(
     amount: Decimal,
     label: str,
     success_url: str = "",
+    payment_type: str = "AC",
 ) -> str:
-    """YooMoney QuickPay form URL for transfer to wallet."""
+    """
+    YooMoney QuickPay link.
+    payment_type: AC = карта, PC = кошелёк ЮMoney.
+    """
     params = {
         "receiver": wallet,
-        "quickpay-form": "shop",
+        "quickpay-form": "button",
         "targets": f"Order {label}",
-        "paymentType": "SB",
+        "paymentType": payment_type,
         "sum": f"{amount:.2f}",
         "label": label,
     }
     if success_url:
         params["successURL"] = success_url
-    return "https://yoomoney.ru/quickpay/confirm.xml?" + urlencode(params)
+    return "https://yoomoney.ru/quickpay/confirm?" + urlencode(params)
 
 
-def verify_notification(
-    data: dict,
-    notification_secret: str,
-) -> bool:
-    """
-    Verify YooMoney HTTP notification signature.
-    sha1(notification_type&operation_id&amount&currency&datetime&sender&codepro&notification_secret&label)
-    """
+def verify_notification(data: dict, notification_secret: str) -> bool:
     parts = [
         data.get("notification_type", ""),
         data.get("operation_id", ""),
@@ -61,35 +61,55 @@ async def check_operation_by_label(
     token: str,
     label: str,
     expected_amount: Decimal,
-) -> bool:
+) -> tuple[bool, str]:
     """
-    Optional: check recent operations via YooMoney API (OAuth token).
-    Falls back to False if token empty / API fails — webhook is preferred.
+    Check incoming payment via YooMoney OAuth API (operation-history).
+    Returns (paid, reason_code).
     """
     if not token:
-        return False
+        return False, "no_oauth_token"
+    if not label:
+        return False, "no_label"
 
     url = "https://yoomoney.ru/api/operation-history"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {"label": label, "records": 10, "type": "deposition"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    # Without type filter — label can be on incoming-transfer / deposition
+    payload = {"label": label, "records": 30}
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             resp = await client.post(url, headers=headers, data=payload)
+            if resp.status_code == 401:
+                return False, "oauth_unauthorized"
+            if resp.status_code == 403:
+                return False, "oauth_forbidden"
             resp.raise_for_status()
             data = resp.json()
     except Exception:
-        return False
+        logger.exception("YooMoney operation-history failed")
+        return False, "api_error"
+
+    if data.get("error"):
+        logger.warning("YooMoney API error: %s", data.get("error"))
+        return False, f"api_{data.get('error')}"
 
     for op in data.get("operations", []):
-        if op.get("label") != label:
+        op_label = str(op.get("label") or "")
+        if op_label != label:
             continue
-        if op.get("status") != "success":
+        status = op.get("status")
+        # success / in_progress — для входящих часто success
+        if status not in (None, "success", "done"):
             continue
         try:
             amount = Decimal(str(op.get("amount", 0)))
         except Exception:
             continue
-        if amount >= expected_amount:
-            return True
-    return False
+        # допускаем небольшую погрешность
+        if amount + Decimal("0.01") >= expected_amount:
+            return True, "ok"
+
+    return False, "not_found"

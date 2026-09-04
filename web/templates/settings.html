@@ -43,21 +43,29 @@
     </div>
     <div class="form-row">
       <div>
-        <label>ЮMoney кошелёк</label>
-        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" />
+        <label>ЮMoney кошелёк (номер)</label>
+        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" placeholder="41001..." />
       </div>
       <div>
         <label>ЮMoney notification secret</label>
         <input name="yoomoney_secret" value="{{ pay.yoomoney_secret }}" />
+        <p style="color:var(--muted);font-size:0.7rem;margin-top:-0.5rem;">
+          Только для HTTP-уведомлений (автовыдача). Сам по себе кнопку «Проверить» не включает.
+        </p>
       </div>
     </div>
-    <label>ЮMoney OAuth token (для проверки истории)</label>
-    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" />
+    <label>ЮMoney OAuth token (нужен для «Проверить оплату» в боте)</label>
+    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" placeholder="длинный токен..." />
+    <p style="color:var(--muted);font-size:0.75rem;">
+      Создайте приложение: <a href="https://yoomoney.ru/myservices/new" target="_blank" rel="noopener">yoomoney.ru/myservices/new</a>
+      · права: <code>operation-history</code> · получите токен и вставьте сюда.<br>
+      Либо без токена: в разделе <b>Заказы</b> жмите «Подтвердить» вручную после оплаты.<br>
+      HTTP-уведомления (секрет): URL
+      <code>http://ВАШ_IP:8000/api/yoomoney/notify</code>
+      (лучше HTTPS-домен) в настройках кошелька ЮMoney.
+    </p>
     <label>Реферальный процент (%)</label>
     <input name="referral_percent" type="number" step="0.01" min="0" max="100" value="{{ pay.referral_percent }}" />
-    <p style="color:var(--muted);font-size:0.75rem;">
-      Webhook ЮMoney: <code>https://YOUR_DOMAIN/api/yoomoney/notify</code>
-    </p>
     <button class="btn" type="submit">Сохранить платежи</button>
   </form>
 </div>
