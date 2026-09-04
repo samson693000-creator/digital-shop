@@ -3,17 +3,25 @@
 {% block content %}
 <h1 class="page-title">Настройки</h1>
 
-{% if request.query_params.get('saved') %}
-<div class="flash">Сохранено. Токен бота подхватывается без перезапуска веб-сервера (бот перечитает при следующем старте / если ждал токен).</div>
+{% if request.query_params.get('saved') == 'bot' %}
+<div class="flash">
+  Сохранено. <b>Обязательно перезапустите бота на сервере:</b><br>
+  <code>sudo systemctl restart digital-shop</code>
+</div>
+{% elif request.query_params.get('saved') %}
+<div class="flash">Сохранено.</div>
 {% endif %}
 
 <div class="panel">
   <h2>Бот</h2>
   <form method="post" action="/settings/bot">
-    <label>Токен Telegram-бота</label>
-    <input name="bot_token" value="{{ settings.get('bot_token', '') }}" placeholder="123456:ABC..." />
-    <label>ID администраторов (через запятую)</label>
-    <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" placeholder="123456789,987654321" />
+    <label>Токен Telegram-бота (от @BotFather)</label>
+    <input name="bot_token" value="{{ settings.get('bot_token', '') }}" placeholder="7123456789:AAH..." />
+    <label>ID администраторов Telegram (ваш user id, НЕ id бота)</label>
+    <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" placeholder="123456789" />
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:-0.5rem;">
+      Узнать свой id: напишите боту @userIdBot. Поле не нужно для работы /start.
+    </p>
     <label>Приветственный текст</label>
     <textarea name="welcome_text">{{ settings.get('welcome_text', '') }}</textarea>
     <button class="btn" type="submit">Сохранить бота</button>

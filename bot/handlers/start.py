@@ -16,7 +16,7 @@ async def cmd_start(message: Message, command: CommandObject):
         ref_code = command.args[4:]
 
     async with async_session() as session:
-        user, _ = await crud.get_or_create_user(
+        await crud.get_or_create_user(
             session,
             telegram_id=message.from_user.id,
             username=message.from_user.username,
@@ -29,7 +29,11 @@ async def cmd_start(message: Message, command: CommandObject):
             "👋 Добро пожаловать!",
         )
 
-    await message.answer(welcome, reply_markup=main_menu())
+    try:
+        await message.answer(welcome, reply_markup=main_menu())
+    except Exception:
+        # если в тексте сломан HTML — шлём без разметки
+        await message.answer(welcome, reply_markup=main_menu(), parse_mode=None)
 
 
 @router.message(F.text == "ℹ️ Помощь")

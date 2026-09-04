@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -7,6 +9,25 @@ from database.database import async_session
 
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="web/templates")
+ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+
+def _sync_env_bot_token(token: str) -> None:
+    """Keep .env BOT_TOKEN in sync so restarts always see the token."""
+    if not ENV_PATH.exists():
+        return
+    lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+    out = []
+    found = False
+    for line in lines:
+        if line.startswith("BOT_TOKEN="):
+            out.append(f"BOT_TOKEN={token}")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        out.append(f"BOT_TOKEN={token}")
+    ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 @router.get("", response_class=HTMLResponse)
@@ -31,10 +52,12 @@ async def save_bot_settings(
     admin_ids: str = Form(""),
     welcome_text: str = Form(""),
 ):
+    token = bot_token.strip()
     async with async_session() as session:
-        await crud.set_setting(session, "bot_token", bot_token.strip())
+        await crud.set_setting(session, "bot_token", token)
         await crud.set_setting(session, "admin_ids", admin_ids.strip())
         await crud.set_setting(session, "welcome_text", welcome_text.strip())
+    _sync_env_bot_token(token)
     return RedirectResponse("/settings?saved=bot", status_code=302)
 
 

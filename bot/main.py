@@ -16,9 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 async def get_bot_token() -> str:
+    from config import settings
+
     async with async_session() as session:
         token = await crud.get_setting(session, "bot_token", "")
-    return token.strip()
+    token = (token or "").strip()
+    if not token:
+        token = (settings.bot_token or "").strip()
+    return token
 
 
 async def run_bot() -> None:
@@ -26,9 +31,9 @@ async def run_bot() -> None:
     token = await get_bot_token()
     if not token:
         logger.error(
-            "BOT_TOKEN не задан. Укажите в .env или в админке (Настройки бота)."
+            "BOT_TOKEN не задан. Укажите в админке (Настройки) и подождите, "
+            "либо: systemctl restart digital-shop"
         )
-        # Wait and retry so web panel can set token without restart race
         while not token:
             await asyncio.sleep(5)
             token = await get_bot_token()
@@ -36,6 +41,19 @@ async def run_bot() -> None:
                 logger.info("Токен бота получен из БД, запускаю...")
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        me = await bot.get_me()
+        logger.info("Бот авторизован: @%s (id=%s)", me.username, me.id)
+    except Exception:
+        logger.exception(
+            "Невалидный BOT_TOKEN. Проверьте токен в админке и перезапустите сервис."
+        )
+        await bot.session.close()
+        raise
+
+    # Иначе polling не получает апдейты, если раньше был webhook
+    await bot.delete_webhook(drop_pending_updates=True)
+
     dp = Dispatcher()
     dp.include_router(start.router)
     dp.include_router(catalog.router)
@@ -43,5 +61,5 @@ async def run_bot() -> None:
     dp.include_router(profile.router)
     dp.include_router(referral.router)
 
-    logger.info("Telegram bot started")
+    logger.info("Telegram bot polling started")
     await dp.start_polling(bot)
