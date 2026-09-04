@@ -60,8 +60,8 @@ fi
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   log "Обновление репозитория..."
-  git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
-  git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
+  git -c "safe.directory=${INSTALL_DIR}" -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+  git -c "safe.directory=${INSTALL_DIR}" -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
 else
   log "Клонирование ${REPO_URL}..."
   rm -rf "$INSTALL_DIR"
