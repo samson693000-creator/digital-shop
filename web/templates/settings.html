@@ -5,30 +5,29 @@
 
 {% if request.query_params.get('saved') == 'bot' %}
 <div class="flash">
-  Сохранено. <b>Обязательно перезапустите бота на сервере:</b><br>
-  <code>sudo systemctl restart digital-shop</code>
+  Сохранено. <b>Перезапустите бота:</b> <code>sudo systemctl restart digital-shop</code>
 </div>
 {% elif request.query_params.get('saved') %}
 <div class="flash">Сохранено.</div>
 {% endif %}
 
 {% if oauth_ok == 'ok' %}
-<div class="flash">OAuth-токен ЮMoney получен и сохранён. Можно проверять оплату в боте.</div>
+<div class="flash">✅ OAuth-токен ЮMoney получен и сохранён.</div>
 {% endif %}
 {% if oauth_err %}
-<div class="error">Не удалось получить токен: {{ oauth_err }}. Проверьте Client ID, Redirect URI = {{ yoomoney_redirect }}, и что code свежий (одноразовый).</div>
+<div class="error">Ошибка OAuth: {{ oauth_err }}. Redirect URI в ЮMoney должен быть ровно: <code>{{ yoomoney_redirect }}</code></div>
+{% endif %}
+{% if oauth_ready == '1' and yoomoney_auth_url %}
+<div class="flash">Данные сохранены. Теперь откройте ссылку <b>в Google Chrome</b> (не в Яндекс.Браузере).</div>
 {% endif %}
 
 <div class="panel">
   <h2>Бот</h2>
   <form method="post" action="/settings/bot">
-    <label>Токен Telegram-бота (от @BotFather)</label>
-    <input name="bot_token" value="{{ settings.get('bot_token', '') }}" placeholder="7123456789:AAH..." />
-    <label>ID администраторов Telegram (ваш user id, НЕ id бота)</label>
-    <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" placeholder="123456789" />
-    <p style="color:var(--muted);font-size:0.75rem;margin-top:-0.5rem;">
-      Узнать свой id: напишите боту @userIdBot. Поле не нужно для работы /start.
-    </p>
+    <label>Токен Telegram-бота</label>
+    <input name="bot_token" value="{{ settings.get('bot_token', '') }}" />
+    <label>ID администраторов</label>
+    <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" />
     <label>Приветственный текст</label>
     <textarea name="welcome_text">{{ settings.get('welcome_text', '') }}</textarea>
     <button class="btn" type="submit">Сохранить бота</button>
@@ -36,37 +35,55 @@
 </div>
 
 <div class="panel" id="yoomoney-oauth">
-  <h2>Получить токен ЮMoney (OAuth)</h2>
-  <p style="color:var(--muted);font-size:0.85rem;">
-    Client ID — не токен. Ниже получим настоящий <b>access_token</b> для кнопки «Проверить оплату».
+  <h2>Получить токен ЮMoney</h2>
+  <p style="color:var(--warn);font-size:0.85rem;">
+    ⚠️ Не открывайте авторизацию в <b>Яндекс.Браузере</b> — там цикл SMS/пароль.
+    Используйте <b>Google Chrome</b> или Edge.
   </p>
-  <ol style="color:var(--text);font-size:0.85rem;line-height:1.7;padding-left:1.2rem;">
-    <li>В приложении ЮMoney укажите Redirect URI: <code>{{ yoomoney_redirect }}</code></li>
-    <li>Вставьте Client ID и сохраните</li>
-    <li>Откройте ссылку «Разрешить доступ», войдите в ЮMoney</li>
-    <li>В адресной строке скопируйте <code>code=...</code> и вставьте ниже</li>
+
+  <ol style="color:var(--text);font-size:0.85rem;line-height:1.8;padding-left:1.2rem;">
+    <li>В приложении ЮMoney Redirect URI = <code>{{ yoomoney_redirect }}</code></li>
+    <li>Сохраните Client ID ниже</li>
+    <li>Скопируйте ссылку и вставьте в <b>Chrome</b> (или нажмите «Открыть» если админка уже в Chrome)</li>
+    <li>Пройдите SMS один раз — вас вернёт сюда, токен сохранится сам</li>
   </ol>
 
-  <form method="post" action="/settings/yoomoney/save-client" style="margin-bottom:1rem;">
+  {% if has_oauth_token %}
+  <div class="flash">Токен уже есть. Можно получить заново.</div>
+  {% endif %}
+
+  <form method="post" action="/settings/yoomoney/prepare">
     <label>Client ID</label>
-    <input name="client_id" value="{{ yoomoney_client_id }}" placeholder="ваш client_id" required />
-    <button class="btn" type="submit">Сохранить Client ID</button>
+    <input name="client_id" value="{{ yoomoney_client_id }}" required />
+    <label>Адрес сервера</label>
+    <input name="public_base" value="{{ public_base }}" required />
+    <button class="btn" type="submit">1) Сохранить и показать ссылку</button>
   </form>
 
   {% if yoomoney_auth_url %}
-  <p style="margin-bottom:1rem;">
-    <a class="btn" href="{{ yoomoney_auth_url }}" target="_blank" rel="noopener">1) Открыть — Разрешить доступ</a>
-  </p>
-  {% else %}
-  <p style="color:var(--muted);font-size:0.8rem;">Сначала сохраните Client ID — появится кнопка авторизации.</p>
+  <div style="margin-top:1.25rem;">
+    <label>2) Ссылка авторизации (откройте в Chrome)</label>
+    <textarea id="oauth-url" readonly rows="3" style="font-size:0.75rem;">{{ yoomoney_auth_url }}</textarea>
+    <button class="btn" type="button" id="copy-oauth">Скопировать ссылку</button>
+    <a class="btn" href="{{ yoomoney_auth_url }}" target="_blank" rel="noopener noreferrer" style="margin-left:0.5rem;">Открыть в новой вкладке</a>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem;">
+      Если «Открыть» снова кидает в Яндекс — нажмите «Скопировать», откройте Chrome вручную и вставьте в адресную строку (Ctrl+V → Enter).
+    </p>
+  </div>
+  <script>
+    document.getElementById("copy-oauth")?.addEventListener("click", async () => {
+      const t = document.getElementById("oauth-url");
+      try {
+        await navigator.clipboard.writeText(t.value);
+        alert("Ссылка скопирована. Вставьте её в Google Chrome.");
+      } catch (e) {
+        t.select();
+        document.execCommand("copy");
+        alert("Ссылка скопирована. Вставьте её в Google Chrome.");
+      }
+    });
+  </script>
   {% endif %}
-
-  <form method="post" action="/settings/yoomoney/exchange">
-    <input type="hidden" name="client_id" value="{{ yoomoney_client_id }}" />
-    <label>2) Code из адресной строки (или вся ссылка)</label>
-    <input name="code" placeholder="code=XXXX или https://yoomoney.ru/?code=XXXX" required {% if not yoomoney_client_id %}disabled{% endif %} />
-    <button class="btn" type="submit" {% if not yoomoney_client_id %}disabled{% endif %}>Получить и сохранить токен</button>
-  </form>
 </div>
 
 <div class="panel">
@@ -84,16 +101,16 @@
     </div>
     <div class="form-row">
       <div>
-        <label>ЮMoney кошелёк (номер)</label>
-        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" placeholder="41001..." />
+        <label>ЮMoney кошелёк</label>
+        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" />
       </div>
       <div>
         <label>ЮMoney notification secret</label>
         <input name="yoomoney_secret" value="{{ pay.yoomoney_secret }}" />
       </div>
     </div>
-    <label>ЮMoney OAuth token (заполняется помощником выше)</label>
-    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" placeholder="появится после получения токена" />
+    <label>ЮMoney OAuth token</label>
+    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" />
     <label>Реферальный процент (%)</label>
     <input name="referral_percent" type="number" step="0.01" min="0" max="100" value="{{ pay.referral_percent }}" />
     <button class="btn" type="submit">Сохранить платежи</button>

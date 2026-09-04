@@ -16,15 +16,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    PUBLIC = {"/login", "/api/yoomoney/notify", "/static"}
-
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         request.state.user = None
 
-        if path.startswith("/static") or path in ("/login", "/api/yoomoney/notify"):
-            if path == "/login" and request.method == "POST":
-                return await call_next(request)
+        public = (
+            path.startswith("/static")
+            or path in ("/login", "/api/yoomoney/notify")
+            or path == "/settings/yoomoney/callback"
+        )
+        if public:
             return await call_next(request)
 
         token = request.cookies.get(SESSION_COOKIE)
