@@ -1,0 +1,16 @@
+[Unit]
+Description=Digital Shop (Telegram bot + Web admin)
+After=network.target
+
+[Service]
+Type=simple
+User=digishop
+WorkingDirectory=/opt/digital-shop
+EnvironmentFile=/opt/digital-shop/.env
+ExecStart=/opt/digital-shop/.venv/bin/python /opt/digital-shop/main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h1 class="page-title">Пользователи</h1>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Telegram</th>
+        <th>Username</th>
+        <th>Баланс</th>
+        <th>Реф-код</th>
+        <th>Реферер</th>
+        <th>Создан</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.telegram_id }}</td>
+        <td>@{{ u.username or "—" }}</td>
+        <td>{{ u.balance }}</td>
+        <td><code>{{ u.referral_code }}</code></td>
+        <td>{{ u.referred_by_id or "—" }}</td>
+        <td>{{ u.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">Пользователей нет</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

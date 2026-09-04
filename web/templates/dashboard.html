@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1 class="page-title">Dashboard</h1>
+
+<div class="grid-stats">
+  <div class="stat">
+    <div class="label">Пользователи</div>
+    <div class="value">{{ stats.users }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Оплачено</div>
+    <div class="value">{{ stats.orders_paid }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Доход ₽</div>
+    <div class="value">{{ "%.2f"|format(stats.revenue) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Товары</div>
+    <div class="value">{{ stats.products }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Ключи в наличии</div>
+    <div class="value">{{ stats.keys_available }}</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Последние заказы</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Пользователь</th>
+        <th>Товар</th>
+        <th>Сумма</th>
+        <th>Метод</th>
+        <th>Статус</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.id }}</td>
+        <td>{{ o.user.telegram_id if o.user else "—" }}</td>
+        <td>{{ o.product.name if o.product else "—" }}</td>
+        <td>{{ o.amount }}</td>
+        <td>{{ o.payment_method }}</td>
+        <td><span class="badge {{ o.status }}">{{ o.status }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Заказов пока нет</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

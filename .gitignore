@@ -1,0 +1,10 @@
+# Digital Shop — Telegram bot + Admin panel
+.env
+data/*.db
+data/*.db-*
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+.DS_Store

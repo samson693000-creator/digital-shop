@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<h1 class="page-title">Настройки</h1>
+
+{% if request.query_params.get('saved') %}
+<div class="flash">Сохранено. Токен бота подхватывается без перезапуска веб-сервера (бот перечитает при следующем старте / если ждал токен).</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Бот</h2>
+  <form method="post" action="/settings/bot">
+    <label>Токен Telegram-бота</label>
+    <input name="bot_token" value="{{ settings.get('bot_token', '') }}" placeholder="123456:ABC..." />
+    <label>ID администраторов (через запятую)</label>
+    <input name="admin_ids" value="{{ settings.get('admin_ids', '') }}" placeholder="123456789,987654321" />
+    <label>Приветственный текст</label>
+    <textarea name="welcome_text">{{ settings.get('welcome_text', '') }}</textarea>
+    <button class="btn" type="submit">Сохранить бота</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Платежи и рефералы</h2>
+  <form method="post" action="/settings/payments">
+    <div class="form-row">
+      <div>
+        <label>USDT TRC-20 кошелёк</label>
+        <input name="usdt_trc20_wallet" value="{{ pay.usdt_trc20_wallet }}" />
+      </div>
+      <div>
+        <label>TronGrid API Key</label>
+        <input name="trongrid_api_key" value="{{ pay.trongrid_api_key }}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label>ЮMoney кошелёк</label>
+        <input name="yoomoney_wallet" value="{{ pay.yoomoney_wallet }}" />
+      </div>
+      <div>
+        <label>ЮMoney notification secret</label>
+        <input name="yoomoney_secret" value="{{ pay.yoomoney_secret }}" />
+      </div>
+    </div>
+    <label>ЮMoney OAuth token (для проверки истории)</label>
+    <input name="yoomoney_token" value="{{ pay.yoomoney_token }}" />
+    <label>Реферальный процент (%)</label>
+    <input name="referral_percent" type="number" step="0.01" min="0" max="100" value="{{ pay.referral_percent }}" />
+    <p style="color:var(--muted);font-size:0.75rem;">
+      Webhook ЮMoney: <code>https://YOUR_DOMAIN/api/yoomoney/notify</code>
+    </p>
+    <button class="btn" type="submit">Сохранить платежи</button>
+  </form>
+</div>
+{% endblock %}

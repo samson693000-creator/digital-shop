@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Admin{% endblock %} · DIGITAL SHOP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">DIGITAL SHOP</div>
+      <div class="brand-sub">ADMIN // CYBER</div>
+      <nav class="nav">
+        <a href="/" class="{{ 'active' if page == 'dashboard' else '' }}">Dashboard</a>
+        <a href="/products" class="{{ 'active' if page == 'products' else '' }}">Товары</a>
+        <a href="/products/categories/manage" class="{{ 'active' if page == 'categories' else '' }}">Категории</a>
+        <a href="/orders" class="{{ 'active' if page == 'orders' else '' }}">Заказы</a>
+        <a href="/users" class="{{ 'active' if page == 'users' else '' }}">Пользователи</a>
+        <a href="/settings" class="{{ 'active' if page == 'settings' else '' }}">Настройки</a>
+        <a href="/logout">Выход</a>
+      </nav>
+    </aside>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

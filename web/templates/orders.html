@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Заказы{% endblock %}
+{% block content %}
+<h1 class="page-title">Заказы</h1>
+
+<div class="grid-stats">
+  <div class="stat">
+    <div class="label">Доход</div>
+    <div class="value">{{ "%.2f"|format(stats.revenue) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Оплачено</div>
+    <div class="value">{{ stats.orders_paid }}</div>
+  </div>
+</div>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>TG ID</th>
+        <th>Товар</th>
+        <th>Сумма</th>
+        <th>Метод</th>
+        <th>Статус</th>
+        <th>Выдано</th>
+        <th>Дата</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.id }}</td>
+        <td>{{ o.user.telegram_id if o.user else "—" }}</td>
+        <td>{{ o.product.name if o.product else "—" }}</td>
+        <td>{{ o.amount }}</td>
+        <td>{{ o.payment_method }}</td>
+        <td><span class="badge {{ o.status }}">{{ o.status }}</span></td>
+        <td>{% if o.delivered_content %}<code>{{ o.delivered_content[:40] }}{% if o.delivered_content|length > 40 %}…{% endif %}</code>{% else %}—{% endif %}</td>
+        <td>{{ o.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8">Пусто</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

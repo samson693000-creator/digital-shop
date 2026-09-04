@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Ключи{% endblock %}
+{% block content %}
+<h1 class="page-title">Ключи · {{ product.name }}</h1>
+<p style="color:var(--muted);margin-top:-0.75rem;margin-bottom:1.25rem;">
+  В наличии: {{ available|length }} · Продано: {{ sold|length }}
+</p>
+
+<div class="panel">
+  <h2>Загрузить ключи</h2>
+  <p style="color:var(--muted);font-size:0.8rem;">Один ключ / ссылка / текст на строку.</p>
+  <form method="post" action="/products/{{ product.id }}/keys">
+    <textarea name="keys_text" placeholder="KEY-AAAA&#10;KEY-BBBB&#10;https://example.com/file"></textarea>
+    <button class="btn" type="submit">Загрузить</button>
+    <a class="btn" href="/products" style="margin-left:0.5rem;">Назад</a>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Доступные</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Контент</th></tr></thead>
+    <tbody>
+      {% for k in available %}
+      <tr><td>{{ k.id }}</td><td><code>{{ k.content }}</code></td></tr>
+      {% else %}
+      <tr><td colspan="2">Пусто</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

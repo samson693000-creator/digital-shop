@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login · DIGITAL SHOP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-box">
+      <h1>DIGITAL SHOP</h1>
+      <div class="sub">SECURE ACCESS</div>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <form method="post" action="/login">
+        <label>Login</label>
+        <input type="text" name="username" required autofocus autocomplete="username" />
+        <label>Password</label>
+        <input type="password" name="password" required autocomplete="current-password" />
+        <button class="btn" type="submit" style="width:100%">Войти</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
