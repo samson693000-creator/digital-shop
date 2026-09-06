@@ -379,17 +379,36 @@ async def list_pending_orders(session: AsyncSession, method: str | None = None) 
         select(Order)
         .options(selectinload(Order.product), selectinload(Order.user))
         .where(Order.status == "pending")
+        .order_by(Order.created_at.asc())
     )
     if method:
         q = q.where(Order.payment_method == method)
     return list((await session.execute(q)).scalars().all())
 
 
-async def complete_order(session: AsyncSession, order_id: int) -> Order | None:
+async def used_payment_refs(session: AsyncSession) -> set[str]:
+    rows = (
+        await session.execute(
+            select(Order.payment_ref).where(
+                Order.payment_ref.isnot(None),
+                Order.payment_ref != "",
+            )
+        )
+    ).scalars().all()
+    return {str(r) for r in rows if r}
+
+
+async def complete_order(
+    session: AsyncSession,
+    order_id: int,
+    payment_ref: str | None = None,
+) -> Order | None:
     """Mark order paid, deliver key, credit referral."""
     order = await get_order(session, order_id)
     if not order or order.status != "pending":
         return order
+    if payment_ref:
+        order.payment_ref = payment_ref[:128]
 
     key = await take_available_key(session, order.product_id)
     if key is None:

@@ -7,8 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import crud
 
 
-async def deliver_order(session: AsyncSession, bot: Bot, order_id: int) -> bool:
-    order = await crud.complete_order(session, order_id)
+async def deliver_order(
+    session: AsyncSession,
+    bot: Bot,
+    order_id: int,
+    payment_ref: str | None = None,
+) -> bool:
+    order = await crud.complete_order(session, order_id, payment_ref=payment_ref)
     if not order or order.status != "paid" or not order.delivered_content:
         return False
 

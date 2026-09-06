@@ -1,9 +1,11 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from bot.services.delivery import deliver_order
-from bot.services.payment_yoomoney import verify_notification
+from bot.services.payment_yoomoney import verify_notification, yoomoney_amount_ok
 from database import crud
 from database.database import async_session
 
@@ -84,8 +86,18 @@ async def yoomoney_notify(request: Request):
             return HTMLResponse("bad signature", status_code=400)
 
         label = form.get("label", "")
+        op_id = form.get("operation_id", "")
         orders = await crud.list_pending_orders(session, method="yoomoney")
-        order = next((o for o in orders if o.external_id == label), None)
+        order = next((o for o in orders if label and o.external_id == label), None)
+        if not order:
+            try:
+                got = Decimal(str(form.get("amount") or form.get("withdraw_amount") or "0"))
+            except Exception:
+                got = Decimal("0")
+            order = next(
+                (o for o in orders if yoomoney_amount_ok(Decimal(str(o.amount)), got)),
+                None,
+            )
         if not order:
             return HTMLResponse("ok")
 
@@ -100,10 +112,10 @@ async def yoomoney_notify(request: Request):
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
             )
             try:
-                await deliver_order(session, bot, order.id)
+                await deliver_order(session, bot, order.id, payment_ref=op_id or None)
             finally:
                 await bot.session.close()
         else:
-            await crud.complete_order(session, order.id)
+            await crud.complete_order(session, order.id, payment_ref=op_id or None)
 
     return HTMLResponse("ok")

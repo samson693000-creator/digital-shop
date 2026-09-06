@@ -62,4 +62,15 @@ async def run_bot() -> None:
     dp.include_router(referral.router)
 
     logger.info("Telegram bot polling started")
-    await dp.start_polling(bot)
+    from bot.services.payment_watch import watch_pending_payments
+
+    watcher = asyncio.create_task(watch_pending_payments(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
+        await bot.session.close()

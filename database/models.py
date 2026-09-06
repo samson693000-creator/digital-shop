@@ -119,6 +119,7 @@ class Order(Base):
     external_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True, index=True
     )
+    payment_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

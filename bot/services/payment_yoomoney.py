@@ -4,12 +4,17 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import urlencode
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Карта ЮMoney обычно берёт ~3% с получателя (50 ₽ → 48,50 ₽).
+YM_MIN_RATIO = Decimal("0.90")
+YM_MAX_OVER = Decimal("0.50")
 
 
 def make_label() -> str:
@@ -20,8 +25,21 @@ def clean_oauth_token(token: str) -> str:
     t = (token or "").strip().strip('"').strip("'")
     if t.lower().startswith("bearer "):
         t = t[7:].strip()
-    # remove accidental whitespace/newlines from copy-paste
     return "".join(t.split())
+
+
+def yoomoney_amount_ok(expected: Decimal, received: Decimal, *, labeled: bool = False) -> bool:
+    """True if received matches expected after typical card/wallet fees."""
+    try:
+        exp = Decimal(str(expected))
+        got = Decimal(str(received))
+    except Exception:
+        return False
+    if exp <= 0 or got <= 0:
+        return False
+    min_ok = (exp * (Decimal("0.80") if labeled else YM_MIN_RATIO)).quantize(Decimal("0.01"))
+    max_ok = exp + YM_MAX_OVER
+    return min_ok <= got <= max_ok
 
 
 def build_quickpay_url(
@@ -33,7 +51,7 @@ def build_quickpay_url(
 ) -> str:
     params = {
         "receiver": wallet,
-        "quickpay-form": "button",
+        "quickpay-form": "shop",
         "targets": f"Order {label}",
         "paymentType": payment_type,
         "sum": f"{amount:.2f}",
@@ -41,7 +59,7 @@ def build_quickpay_url(
     }
     if success_url:
         params["successURL"] = success_url
-    return "https://yoomoney.ru/quickpay/confirm?" + urlencode(params)
+    return "https://yoomoney.ru/quickpay/confirm.xml?" + urlencode(params)
 
 
 def verify_notification(data: dict, notification_secret: str) -> bool:
@@ -93,72 +111,162 @@ async def validate_oauth_token(token: str) -> tuple[bool, str]:
     return True, f"OK · кошелёк API: {account} · длина токена: {len(token)}"
 
 
-async def check_operation_by_label(
-    token: str,
+def _op_text(op: dict) -> str:
+    bits = [
+        op.get("label"),
+        op.get("title"),
+        op.get("details"),
+        op.get("comment"),
+        op.get("message"),
+    ]
+    return " ".join(str(x) for x in bits if x).lower()
+
+
+def _parse_op_dt(op: dict) -> datetime | None:
+    raw = op.get("datetime") or op.get("date") or ""
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _op_id(op: dict) -> str:
+    return str(op.get("operation_id") or op.get("operationId") or "")
+
+
+def _match_operation(
+    operations: list,
+    *,
     label: str,
     expected_amount: Decimal,
-) -> tuple[bool, str]:
-    token = clean_oauth_token(token)
-    if not token:
-        return False, "no_oauth_token"
-    if not label:
-        return False, "no_label"
+    used_ids: set[str],
+    created_at: datetime | None,
+) -> tuple[bool, str, str]:
+    label = (label or "").strip()
+    label_l = label.lower()
+    created_utc = None
+    if created_at is not None:
+        created_utc = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        created_utc = created_utc.timestamp() - 180  # 3 мин запас на рассинхрон часов
 
-    url = "https://yoomoney.ru/api/operation-history"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {"label": label, "records": 50}
+    labeled: list[tuple[Decimal, dict]] = []
+    unlabeled: list[tuple[Decimal, dict]] = []
 
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(url, headers=headers, data=payload)
-            if resp.status_code == 401:
-                return False, "oauth_unauthorized"
-            if resp.status_code == 403:
-                return False, "oauth_forbidden"
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception:
-        logger.exception("YooMoney operation-history failed")
-        return False, "api_error"
-
-    if data.get("error"):
-        logger.warning("YooMoney API error: %s", data.get("error"))
-        return False, f"api_{data.get('error')}"
-
-    for op in data.get("operations", []):
-        op_label = str(op.get("label") or "")
-        if op_label != label:
+    for op in operations:
+        oid = _op_id(op)
+        if oid and oid in used_ids:
             continue
         status = op.get("status")
         if status not in (None, "success", "done"):
+            continue
+        direction = str(op.get("direction") or op.get("type") or "")
+        if direction in ("out", "payment"):
             continue
         try:
             amount = Decimal(str(op.get("amount", 0)))
         except Exception:
             continue
-        if amount + Decimal("0.01") >= expected_amount:
-            return True, "ok"
+        if amount <= 0:
+            continue
 
-    # Fallback: recent incoming with same amount (label sometimes missing)
+        op_dt = _parse_op_dt(op)
+        if created_utc is not None and op_dt is not None:
+            ts = op_dt.timestamp() if op_dt.tzinfo else op_dt.replace(tzinfo=timezone.utc).timestamp()
+            if ts < created_utc:
+                continue
+
+        text = _op_text(op)
+        op_label = str(op.get("label") or "").strip()
+        has_label = bool(label) and (op_label == label or (label_l and label_l in text))
+        if has_label:
+            if yoomoney_amount_ok(expected_amount, amount, labeled=True):
+                labeled.append((amount, op))
+        else:
+            unlabeled.append((amount, op))
+
+    if labeled:
+        _amt, op = labeled[0]
+        return True, "ok", _op_id(op)
+
+    # Без метки: сумма с учётом комиссии (50 → 48.50)
+    for amount, op in unlabeled:
+        if yoomoney_amount_ok(expected_amount, amount, labeled=False):
+            return True, "ok_amount", _op_id(op)
+
+    return False, "not_found", ""
+
+
+async def _fetch_history(token: str, extra: dict) -> tuple[list, str | None]:
+    url = "https://yoomoney.ru/api/operation-history"
+    headers = {"Authorization": f"Bearer {token}"}
+    payload = {"records": 40, "details": "true", **extra}
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(
-                url,
-                headers=headers,
-                data={"records": 20, "type": "deposition"},
-            )
-            if resp.status_code == 200:
-                data2 = resp.json()
-                for op in data2.get("operations", []):
-                    try:
-                        amount = Decimal(str(op.get("amount", 0)))
-                    except Exception:
-                        continue
-                    if abs(amount - expected_amount) <= Decimal("0.01"):
-                        op_label = str(op.get("label") or "")
-                        if not op_label or op_label == label:
-                            return True, "ok_amount"
+            resp = await client.post(url, headers=headers, data=payload)
+            if resp.status_code == 401:
+                return [], "oauth_unauthorized"
+            if resp.status_code == 403:
+                return [], "oauth_forbidden"
+            resp.raise_for_status()
+            data = resp.json()
     except Exception:
-        pass
+        logger.exception("YooMoney operation-history failed")
+        return [], "api_error"
 
-    return False, "not_found"
+    if data.get("error"):
+        logger.warning("YooMoney API error: %s", data.get("error"))
+        return [], f"api_{data.get('error')}"
+    return list(data.get("operations") or []), None
+
+
+async def check_operation_by_label(
+    token: str,
+    label: str,
+    expected_amount: Decimal,
+    used_ids: set[str] | None = None,
+    created_at: datetime | None = None,
+) -> tuple[bool, str, str]:
+    """Returns (paid, reason, operation_id)."""
+    token = clean_oauth_token(token)
+    if not token:
+        return False, "no_oauth_token", ""
+    if not label and expected_amount <= 0:
+        return False, "no_label", ""
+
+    used = used_ids or set()
+    ops: list = []
+    last_err: str | None = None
+
+    queries = []
+    if label:
+        queries.append({"label": label, "type": "deposition"})
+    queries.append({"type": "deposition"})
+    queries.append({})
+
+    seen: set[str] = set()
+    for q in queries:
+        chunk, err = await _fetch_history(token, q)
+        if err and not chunk:
+            last_err = err
+            if err in ("oauth_unauthorized", "oauth_forbidden", "api_error"):
+                return False, err, ""
+            continue
+        for op in chunk:
+            oid = _op_id(op) or str(id(op))
+            if oid in seen:
+                continue
+            seen.add(oid)
+            ops.append(op)
+
+    if not ops and last_err:
+        return False, last_err, ""
+
+    return _match_operation(
+        ops,
+        label=label or "",
+        expected_amount=expected_amount,
+        used_ids=used,
+        created_at=created_at,
+    )

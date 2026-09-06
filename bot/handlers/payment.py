@@ -91,7 +91,7 @@ async def pay_usdt(callback: CallbackQuery):
         f"На адрес (TRC-20):\n"
         f"<code>{wallet}</code>\n\n"
         f"⚠️ Сумма уникальна — отправьте её без округления.\n"
-        f"После перевода нажмите «Проверить оплату».",
+        f"После перевода нажмите «Проверить оплату» или подождите — бот найдёт платёж сам.",
         reply_markup=check_payment_kb(order_id),
     )
     await callback.answer()
@@ -133,9 +133,8 @@ async def pay_yoomoney(callback: CallbackQuery):
         f"Метка: <code>{label}</code>\n\n"
         f"💳 Картой: {url_card}\n"
         f"👛 Кошелёк ЮMoney: {url_wallet}\n\n"
-        f"После оплаты нажмите «Проверить оплату».\n"
-        f"<i>Для авто-проверки в админке нужен OAuth-токен ЮMoney "
-        f"(не путать с notification secret).</i>",
+        f"После оплаты нажмите «Проверить оплату» или подождите — бот найдёт платёж сам "
+        f"(комиссия ЮMoney учитывается, например 50 ₽ → 48,50 ₽).",
         reply_markup=check_payment_kb(order_id),
         disable_web_page_preview=True,
     )
@@ -196,6 +195,7 @@ async def check_payment(callback: CallbackQuery):
 
         pay = await crud.get_payment_settings(session)
         paid = False
+        paid_ref = None
 
         if order.payment_method == "usdt" and order.payment_amount:
             ts = int(order.created_at.timestamp() * 1000) if order.created_at else None
@@ -206,10 +206,12 @@ async def check_payment(callback: CallbackQuery):
                 min_timestamp_ms=ts,
             )
         elif order.payment_method == "yoomoney":
-            paid, reason = await check_operation_by_label(
+            paid, reason, op_id = await check_operation_by_label(
                 token=pay.yoomoney_token or "",
                 label=order.external_id or "",
                 expected_amount=Decimal(str(order.amount)),
+                used_ids=await crud.used_payment_refs(session),
+                created_at=order.created_at,
             )
             if not paid:
                 hints = {
@@ -221,7 +223,10 @@ async def check_payment(callback: CallbackQuery):
                     ),
                     "oauth_unauthorized": "OAuth-токен ЮMoney неверный. Обновите в настройках.",
                     "oauth_forbidden": "У OAuth-токена нет права operation-history.",
-                    "not_found": "Платёж с этой меткой пока не найден в истории ЮMoney. Подождите 1–2 мин.",
+                    "not_found": (
+                        "Платёж пока не найден. Учитывается комиссия ЮMoney "
+                        "(например 50 ₽ → 48,50 ₽). Подождите 20–40 сек — проверка идёт сама."
+                    ),
                     "api_error": "Ошибка запроса к API ЮMoney. Попробуйте позже.",
                 }
                 await callback.answer(
@@ -229,12 +234,15 @@ async def check_payment(callback: CallbackQuery):
                     show_alert=True,
                 )
                 return
+            paid_ref = op_id or None
+        else:
+            paid_ref = None
 
         if not paid:
             await callback.answer("Оплата пока не найдена. Подождите и повторите.", show_alert=True)
             return
 
-        delivered = await deliver_order(session, callback.bot, order_id)
+        delivered = await deliver_order(session, callback.bot, order_id, payment_ref=paid_ref)
 
     if delivered:
         await callback.message.edit_text(

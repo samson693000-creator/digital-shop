@@ -20,9 +20,19 @@ DEFAULT_SETTINGS = {
 }
 
 
+def _sqlite_add_missing_columns(sync_conn) -> None:
+    rows = sync_conn.exec_driver_sql("PRAGMA table_info(orders)").fetchall()
+    names = {r[1] for r in rows}
+    if "payment_ref" not in names:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE orders ADD COLUMN payment_ref VARCHAR(128)"
+        )
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_sqlite_add_missing_columns)
 
     async with async_session() as session:
         for key, value in DEFAULT_SETTINGS.items():
