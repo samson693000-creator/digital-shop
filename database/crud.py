@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -19,6 +20,31 @@ from .models import (
     Setting,
     User,
 )
+
+
+@dataclass
+class CatalogGroup:
+    """Одна кнопка каталога: товар с суммарным остатком (дубли по имени+цене схлопываются)."""
+
+    product_id: int
+    category_id: int
+    name: str
+    price: Decimal
+    description: str | None
+    image_path: str | None
+    is_infinite: bool
+    stock: int  # для infinite: 1 если есть контент, иначе 0
+    product_ids: list[int] = field(default_factory=list)
+
+    @property
+    def in_stock(self) -> bool:
+        return self.stock > 0
+
+    @property
+    def stock_label(self) -> str:
+        if self.is_infinite:
+            return "∞" if self.stock > 0 else "0"
+        return str(self.stock)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
@@ -254,6 +280,109 @@ async def list_products(
     return list((await session.execute(q)).scalars().all())
 
 
+async def list_catalog_groups(
+    session: AsyncSession, category_id: int
+) -> list[CatalogGroup]:
+    """
+    Товары категории, сгруппированные по (имя + цена + infinite).
+    Остаток = сумма невыданных ключей по всем дублям группы.
+    """
+    products = await list_products(session, category_id=category_id, active_only=True)
+    groups: dict[tuple, CatalogGroup] = {}
+    for p in products:
+        gkey = (
+            (p.name or "").strip().casefold(),
+            format(Decimal(str(p.price)), "f"),
+            bool(p.is_infinite),
+        )
+        if gkey not in groups:
+            groups[gkey] = CatalogGroup(
+                product_id=p.id,
+                category_id=p.category_id,
+                name=p.name,
+                price=Decimal(str(p.price)),
+                description=p.description,
+                image_path=p.image_path,
+                is_infinite=bool(p.is_infinite),
+                stock=0,
+                product_ids=[p.id],
+            )
+        else:
+            groups[gkey].product_ids.append(p.id)
+            # Карточка — у самого «полного» / свежего представителя
+            if p.image_path and not groups[gkey].image_path:
+                groups[gkey].image_path = p.image_path
+            if p.description and not groups[gkey].description:
+                groups[gkey].description = p.description
+
+        if p.is_infinite:
+            if p.keys:
+                groups[gkey].stock = 1
+        else:
+            groups[gkey].stock += sum(1 for k in p.keys if not k.is_sold)
+
+    # Стабильный порядок: по имени
+    return sorted(groups.values(), key=lambda g: (g.name.casefold(), g.product_id))
+
+
+async def sibling_product_ids(session: AsyncSession, product: Product) -> list[int]:
+    """ID товаров с тем же именем/ценой/типом в той же категории (дубли админки)."""
+    result = await session.execute(
+        select(Product.id).where(
+            Product.category_id == product.category_id,
+            Product.name == product.name,
+            Product.price == product.price,
+            Product.is_infinite.is_(bool(product.is_infinite)),
+            Product.is_active.is_(True),
+        )
+    )
+    ids = list(result.scalars().all())
+    return ids or [product.id]
+
+
+async def count_available_keys(
+    session: AsyncSession, product_ids: list[int], *, infinite: bool = False
+) -> int:
+    if not product_ids:
+        return 0
+    if infinite:
+        n = (
+            await session.execute(
+                select(func.count(ProductKey.id)).where(
+                    ProductKey.product_id.in_(product_ids)
+                )
+            )
+        ).scalar() or 0
+        return 1 if n else 0
+    return (
+        await session.execute(
+            select(func.count(ProductKey.id)).where(
+                ProductKey.product_id.in_(product_ids),
+                ProductKey.is_sold.is_(False),
+            )
+        )
+    ).scalar() or 0
+
+
+async def take_available_keys(
+    session: AsyncSession, product_ids: list[int], count: int = 1
+) -> list[ProductKey]:
+    """Взять count свободных ключей (FOR UPDATE), без пометки sold — вызывает complete_order."""
+    if count < 1 or not product_ids:
+        return []
+    result = await session.execute(
+        select(ProductKey)
+        .where(
+            ProductKey.product_id.in_(product_ids),
+            ProductKey.is_sold.is_(False),
+        )
+        .order_by(ProductKey.id.asc())
+        .limit(count)
+        .with_for_update()
+    )
+    return list(result.scalars().all())
+
+
 async def get_product(session: AsyncSession, product_id: int) -> Product | None:
     result = await session.execute(
         select(Product)
@@ -415,6 +544,7 @@ async def create_order(
     payment_amount: Decimal | None = None,
     payment_memo: str | None = None,
     external_id: str | None = None,
+    quantity: int = 1,
 ) -> Order:
     order = Order(
         user_id=user_id,
@@ -425,6 +555,7 @@ async def create_order(
         payment_amount=payment_amount,
         payment_memo=payment_memo,
         external_id=external_id,
+        quantity=max(1, int(quantity or 1)),
         status="pending",
     )
     session.add(order)
@@ -481,7 +612,7 @@ async def complete_order(
     order_id: int,
     payment_ref: str | None = None,
 ) -> Order | None:
-    """Mark order paid, deliver key, credit referral."""
+    """Mark order paid, deliver key(s), credit referral."""
     order = await get_order(session, order_id)
     if not order or order.status != "pending":
         return order
@@ -492,25 +623,40 @@ async def complete_order(
     if product is None:
         product = await get_product(session, order.product_id)
 
+    qty = max(1, int(getattr(order, "quantity", None) or 1))
+
     if product and product.is_infinite:
-        key = await get_static_key(session, order.product_id)
+        ids = await sibling_product_ids(session, product)
+        key = None
+        for pid in ids:
+            key = await get_static_key(session, pid)
+            if key:
+                break
         if key is None:
             order.status = "cancelled"
             await session.commit()
             return order
-        # Контент не списывается — ключ остаётся в пуле
+        # Один и тот же контент (qty раз только для отображения не дублируем файл)
         order.delivered_content = key.content
         product.is_active = True
     else:
-        key = await take_available_key(session, order.product_id)
-        if key is None:
+        ids = await sibling_product_ids(session, product) if product else [order.product_id]
+        keys = await take_available_keys(session, ids, qty)
+        if len(keys) < qty:
             order.status = "cancelled"
             await session.commit()
             return order
-        key.is_sold = True
-        key.sold_at = datetime.now(timezone.utc)
-        key.order_id = order.id
-        order.delivered_content = key.content
+        now = datetime.now(timezone.utc)
+        parts: list[str] = []
+        for i, key in enumerate(keys, start=1):
+            key.is_sold = True
+            key.sold_at = now
+            key.order_id = order.id
+            if qty > 1:
+                parts.append(f"#{i}\n{key.content}")
+            else:
+                parts.append(key.content)
+        order.delivered_content = "\n\n——————\n\n".join(parts)
 
     order.status = "paid"
     order.paid_at = datetime.now(timezone.utc)

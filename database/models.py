@@ -137,6 +137,7 @@ class Order(Base):
         String(128), nullable=True, index=True
     )
     payment_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

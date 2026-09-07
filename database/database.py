@@ -27,6 +27,10 @@ def _sqlite_add_missing_columns(sync_conn) -> None:
         sync_conn.exec_driver_sql(
             "ALTER TABLE orders ADD COLUMN payment_ref VARCHAR(128)"
         )
+    if "quantity" not in order_names:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE orders ADD COLUMN quantity INTEGER DEFAULT 1"
+        )
 
     product_rows = sync_conn.exec_driver_sql("PRAGMA table_info(products)").fetchall()
     product_names = {r[1] for r in product_rows}

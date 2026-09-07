@@ -3,7 +3,8 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.models import Category, Product
+from database.crud import CatalogGroup
+from database.models import Category
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -28,27 +29,68 @@ def categories_kb(categories: list[Category], back_to: str | None = None) -> Inl
     return builder.as_markup()
 
 
-def products_kb(products: list[Product], category_id: int) -> InlineKeyboardMarkup:
+def products_kb(groups: list[CatalogGroup], category_id: int) -> InlineKeyboardMarkup:
+    """Одна кнопка на группу товара (не на каждый ключ)."""
     builder = InlineKeyboardBuilder()
-    for p in products:
-        if p.is_infinite:
-            label = f"{p.name} — {p.price} ₽ (∞)"
+    for g in groups:
+        if g.is_infinite:
+            label = f"{g.name} — {g.price} ₽ | В наличии: ∞"
         else:
-            label = f"{p.name} — {p.price} ₽ ({p.available_count} шт.)"
+            label = f"{g.name} — {g.price} ₽ | В наличии: {g.stock} шт."
+        # Telegram button text max ~64 chars
+        if len(label) > 64:
+            label = label[:61] + "…"
         builder.row(
-            InlineKeyboardButton(text=label, callback_data=f"prod:{p.id}")
+            InlineKeyboardButton(text=label, callback_data=f"prod:{g.product_id}")
         )
-    builder.row(InlineKeyboardButton(text="« Назад", callback_data="catalog"))
+    builder.row(
+        InlineKeyboardButton(text="« Назад", callback_data="catalog")
+    )
     return builder.as_markup()
 
 
-def product_actions_kb(product_id: int, in_stock: bool) -> InlineKeyboardMarkup:
+def product_actions_kb(
+    product_id: int,
+    *,
+    in_stock: bool,
+    stock: int = 1,
+    is_infinite: bool = False,
+    category_id: int | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if in_stock:
-        builder.row(
-            InlineKeyboardButton(text="💳 Купить", callback_data=f"buy:{product_id}")
-        )
-    builder.row(InlineKeyboardButton(text="« Назад", callback_data="catalog"))
+        if is_infinite:
+            builder.row(
+                InlineKeyboardButton(
+                    text="💳 Купить",
+                    callback_data=f"buy:{product_id}:1",
+                )
+            )
+        else:
+            max_qty = min(int(stock), 5)
+            if max_qty <= 1:
+                builder.row(
+                    InlineKeyboardButton(
+                        text="💳 Купить",
+                        callback_data=f"buy:{product_id}:1",
+                    )
+                )
+            else:
+                row: list[InlineKeyboardButton] = []
+                for q in range(1, max_qty + 1):
+                    row.append(
+                        InlineKeyboardButton(
+                            text=f"{q} шт.",
+                            callback_data=f"buy:{product_id}:{q}",
+                        )
+                    )
+                    if len(row) == 3:
+                        builder.row(*row)
+                        row = []
+                if row:
+                    builder.row(*row)
+    back = f"cat:{category_id}" if category_id else "catalog"
+    builder.row(InlineKeyboardButton(text="« Назад", callback_data=back))
     return builder.as_markup()
 
 

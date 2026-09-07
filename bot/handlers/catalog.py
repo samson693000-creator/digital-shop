@@ -22,7 +22,10 @@ async def _show_catalog(target, edit: bool = False):
         text = "🛒 Каталог пуст. Загляните позже."
 
     if edit and isinstance(target, CallbackQuery):
-        await target.message.edit_text(text, reply_markup=kb)
+        try:
+            await target.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            await target.message.answer(text, reply_markup=kb)
         await target.answer()
     elif isinstance(target, CallbackQuery):
         await target.message.answer(text, reply_markup=kb)
@@ -51,28 +54,41 @@ async def open_category(callback: CallbackQuery):
             return
 
         subcats = await crud.list_categories(session, parent_id=cat_id)
-        products = await crud.list_products(session, category_id=cat_id)
+        groups = await crud.list_catalog_groups(session, category_id=cat_id)
 
     if subcats:
         text = f"📁 <b>{category.name}</b>\n\nВыберите подкатегорию:"
-        await callback.message.edit_text(
-            text, reply_markup=categories_kb(subcats, back_to="catalog")
-        )
+        try:
+            await callback.message.edit_text(
+                text, reply_markup=categories_kb(subcats, back_to="catalog")
+            )
+        except Exception:
+            await callback.message.answer(
+                text, reply_markup=categories_kb(subcats, back_to="catalog")
+            )
         await callback.answer()
         return
 
-    if not products:
-        await callback.message.edit_text(
-            f"📁 <b>{category.name}</b>\n\nТоваров пока нет.",
-            reply_markup=categories_kb([], back_to="catalog"),
-        )
+    if not groups:
+        try:
+            await callback.message.edit_text(
+                f"📁 <b>{category.name}</b>\n\nТоваров пока нет.",
+                reply_markup=categories_kb([], back_to="catalog"),
+            )
+        except Exception:
+            await callback.message.answer(
+                f"📁 <b>{category.name}</b>\n\nТоваров пока нет.",
+                reply_markup=categories_kb([], back_to="catalog"),
+            )
         await callback.answer()
         return
 
     text = f"📁 <b>{category.name}</b>\n\nВыберите товар:"
-    await callback.message.edit_text(
-        text, reply_markup=products_kb(products, cat_id)
-    )
+    kb = products_kb(groups, cat_id)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb)
     await callback.answer()
 
 
@@ -84,13 +100,17 @@ async def open_product(callback: CallbackQuery):
         if not product or not product.is_active:
             await callback.answer("Товар не найден", show_alert=True)
             return
-        stock = product.available_count
+        ids = await crud.sibling_product_ids(session, product)
+        stock = await crud.count_available_keys(
+            session, ids, infinite=bool(product.is_infinite)
+        )
         name = product.name
         desc = product.description or "Без описания"
         price = product.price
         image_path = product.image_path
         infinite = bool(product.is_infinite)
-        in_stock = product.in_stock
+        category_id = product.category_id
+        in_stock = stock > 0
 
     if infinite:
         stock_line = "✅ В наличии: ∞" if in_stock else "❌ Нет контента для выдачи"
@@ -102,7 +122,15 @@ async def open_product(callback: CallbackQuery):
         f"💰 Цена: <b>{price} ₽</b>\n"
         f"{stock_line}"
     )
-    kb = product_actions_kb(product_id, in_stock)
+    if not infinite and stock > 1:
+        text += "\n\nВыберите количество:"
+    kb = product_actions_kb(
+        product_id,
+        in_stock=in_stock,
+        stock=stock,
+        is_infinite=infinite,
+        category_id=category_id,
+    )
 
     from bot.services.delivery import product_image_abs
     from aiogram.types import FSInputFile
@@ -110,7 +138,6 @@ async def open_product(callback: CallbackQuery):
     img = product_image_abs(image_path)
     try:
         if img:
-            # edit_text не умеет картинку — удаляем и шлём фото
             try:
                 await callback.message.delete()
             except Exception:
@@ -121,7 +148,10 @@ async def open_product(callback: CallbackQuery):
                 reply_markup=kb,
             )
         else:
-            await callback.message.edit_text(text, reply_markup=kb)
+            try:
+                await callback.message.edit_text(text, reply_markup=kb)
+            except Exception:
+                await callback.message.answer(text, reply_markup=kb)
     except Exception:
         await callback.message.answer(text, reply_markup=kb)
     await callback.answer()

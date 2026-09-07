@@ -19,7 +19,11 @@ router = Router()
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_product(callback: CallbackQuery):
-    product_id = int(callback.data.split(":")[1])
+    parts = callback.data.split(":")
+    product_id = int(parts[1])
+    qty = int(parts[2]) if len(parts) > 2 else 1
+    qty = max(1, min(qty, 10))
+
     async with async_session() as session:
         user, _ = await crud.get_or_create_user(
             session,
@@ -31,29 +35,45 @@ async def buy_product(callback: CallbackQuery):
         if not product or not product.is_active:
             await callback.answer("Товар недоступен", show_alert=True)
             return
-        if not product.in_stock:
+
+        ids = await crud.sibling_product_ids(session, product)
+        stock = await crud.count_available_keys(
+            session, ids, infinite=bool(product.is_infinite)
+        )
+        if stock < 1:
             await callback.answer("Нет в наличии", show_alert=True)
             return
+        if not product.is_infinite and qty > stock:
+            await callback.answer(f"Доступно только {stock} шт.", show_alert=True)
+            return
+        if product.is_infinite:
+            qty = 1
 
-        # Placeholder order — payment method chosen next
+        unit = Decimal(str(product.price))
+        total = (unit * qty).quantize(Decimal("0.01"))
         order = await crud.create_order(
             session,
             user_id=user.id,
             product_id=product.id,
-            amount=Decimal(str(product.price)),
+            amount=total,
             payment_method="pending",
+            quantity=qty,
         )
         order_id = order.id
-        price = product.price
         name = product.name
 
-    await callback.message.edit_text(
+    qty_line = f"× {qty} шт.\n" if qty > 1 else ""
+    text = (
         f"💳 <b>Оформление заказа #{order_id}</b>\n\n"
         f"📦 {name}\n"
-        f"💰 Сумма: <b>{price} ₽</b>\n\n"
-        f"Выберите способ оплаты:",
-        reply_markup=payment_methods_kb(order_id),
+        f"{qty_line}"
+        f"💰 Сумма: <b>{total} ₽</b>\n\n"
+        f"Выберите способ оплаты:"
     )
+    try:
+        await callback.message.edit_text(text, reply_markup=payment_methods_kb(order_id))
+    except Exception:
+        await callback.message.answer(text, reply_markup=payment_methods_kb(order_id))
     await callback.answer()
 
 
