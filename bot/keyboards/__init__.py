@@ -31,8 +31,10 @@ def categories_kb(categories: list[Category], back_to: str | None = None) -> Inl
 def products_kb(products: list[Product], category_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for p in products:
-        stock = p.available_count
-        label = f"{p.name} — {p.price} ₽ ({stock} шт.)"
+        if p.is_infinite:
+            label = f"{p.name} — {p.price} ₽ (∞)"
+        else:
+            label = f"{p.name} — {p.price} ₽ ({p.available_count} шт.)"
         builder.row(
             InlineKeyboardButton(text=label, callback_data=f"prod:{p.id}")
         )

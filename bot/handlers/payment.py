@@ -31,7 +31,7 @@ async def buy_product(callback: CallbackQuery):
         if not product or not product.is_active:
             await callback.answer("Товар недоступен", show_alert=True)
             return
-        if product.available_count < 1:
+        if not product.in_stock:
             await callback.answer("Нет в наличии", show_alert=True)
             return
 

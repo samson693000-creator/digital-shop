@@ -5,6 +5,8 @@
 
 {% if flash == 'deleted' %}
 <div class="flash">Товар удалён.</div>
+{% elif flash == 'infinite' %}
+<div class="flash">Бесконечный товар создан — один и тот же контент для всех покупателей.</div>
 {% elif flash and flash.startswith('created_') %}
 <div class="flash">Товар создан, позиций для выдачи: {{ flash.split('_')[1] }}.</div>
 {% endif %}
@@ -57,16 +59,25 @@
         <input name="description_file" type="file" accept=".txt,text/plain" />
       </div>
     </div>
+
+    <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;margin:0.75rem 0;">
+      <input type="checkbox" name="is_infinite" value="on" id="is_infinite" style="width:auto;margin:0;" />
+      Бесконечный товар (одинаковый контент для всех покупателей, остаток ∞)
+    </label>
+    <p class="hint" id="infinite-hint" style="display:none;">
+      Укажите <b>один</b> текст или <b>один</b> файл — он будет выдаваться каждый раз без списания.
+    </p>
+
     <label>Что получит покупатель после оплаты — текст</label>
-    <p class="hint" style="margin-top:-0.25rem;">
+    <p class="hint" style="margin-top:-0.25rem;" id="keys-hint">
       Один ключ / логин / ссылка / текст — на строку. Каждая строка = 1 продажа.
     </p>
     <textarea name="keys_text" placeholder="login:pass&#10;KEY-AAAA-BBBB&#10;https://example.com/file.zip"></textarea>
     <label>Или файлы на выдачу (фото, txt, pdf, zip…)</label>
-    <p class="hint" style="margin-top:-0.25rem;">
+    <p class="hint" style="margin-top:-0.25rem;" id="files-hint">
       Можно выбрать несколько файлов. Каждый файл = 1 продажа (покупатель получит файл в Telegram).
     </p>
-    <input name="delivery_files" type="file" multiple />
+    <input name="delivery_files" type="file" multiple id="delivery_files" />
     <button class="btn" type="submit" {% if not categories %}disabled{% endif %}>Создать товар</button>
   </form>
 </div>
@@ -82,6 +93,7 @@
         <th>Категория</th>
         <th>Цена</th>
         <th>Остаток</th>
+        <th>Тип</th>
         <th>Активен</th>
         <th></th>
       </tr>
@@ -98,7 +110,8 @@
         <td>{{ p.name }}</td>
         <td>{{ p.category.name if p.category else "—" }}</td>
         <td>{{ p.price }}</td>
-        <td>{{ p.available_count }} / {{ p.keys|length }}</td>
+        <td>{{ p.stock_label }}</td>
+        <td>{% if p.is_infinite %}∞{% else %}штучный{% endif %}</td>
         <td>{{ "да" if p.is_active else "нет" }}</td>
         <td>
           <a class="btn btn-sm" href="/products/{{ p.id }}/keys">Выдача</a>
@@ -108,9 +121,31 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8">Нет товаров. Сначала создайте категорию, затем товар.</td></tr>
+      <tr><td colspan="9">Нет товаров. Сначала создайте категорию, затем товар.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+(function () {
+  const cb = document.getElementById("is_infinite");
+  const hint = document.getElementById("infinite-hint");
+  const keysHint = document.getElementById("keys-hint");
+  const filesHint = document.getElementById("files-hint");
+  const files = document.getElementById("delivery_files");
+  function sync() {
+    const on = cb && cb.checked;
+    if (hint) hint.style.display = on ? "block" : "none";
+    if (keysHint) keysHint.textContent = on
+      ? "Весь текст ниже — один постоянный контент для всех покупок."
+      : "Один ключ / логин / ссылка / текст — на строку. Каждая строка = 1 продажа.";
+    if (filesHint) filesHint.textContent = on
+      ? "Для бесконечного режима достаточно одного файла (он заменит текст, если выбран)."
+      : "Можно выбрать несколько файлов. Каждый файл = 1 продажа.";
+    if (files) files.multiple = !on;
+  }
+  cb?.addEventListener("change", sync);
+  sync();
+})();
+</script>
 {% endblock %}

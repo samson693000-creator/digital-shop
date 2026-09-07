@@ -58,11 +58,13 @@ async def create_product(
     price: float = Form(...),
     description: str = Form(""),
     keys_text: str = Form(""),
+    is_infinite: str = Form("off"),
     image: UploadFile | None = File(None),
     description_file: UploadFile | None = File(None),
     delivery_files: list[UploadFile] = File(default=[]),
 ):
     ensure_upload_dirs()
+    infinite = is_infinite in ("on", "true", "1", "yes")
     desc = (description or "").strip()
 
     # Описание из .txt (поверх поля, если файл не пустой)
@@ -83,15 +85,36 @@ async def create_product(
             )
         image_rel, _ = saved
 
-    keys = _split_keys(keys_text)
-    for uf in delivery_files or []:
-        if not uf or not uf.filename:
-            continue
-        saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
-        if not saved:
-            continue
-        rel, original = saved
-        keys.append(encode_file_key(rel, original))
+    keys: list[str] = []
+    if infinite:
+        # Весь текст — один постоянный контент; или один файл
+        text_block = (keys_text or "").replace("\r", "").strip()
+        if text_block:
+            keys = [text_block]
+        for uf in delivery_files or []:
+            if not uf or not uf.filename:
+                continue
+            saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
+            if saved:
+                rel, original = saved
+                keys = [encode_file_key(rel, original)]
+                break
+        if not keys:
+            return RedirectResponse(
+                "/products?err="
+                + quote("Для бесконечного товара укажите текст или один файл выдачи"),
+                status_code=302,
+            )
+    else:
+        keys = _split_keys(keys_text)
+        for uf in delivery_files or []:
+            if not uf or not uf.filename:
+                continue
+            saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
+            if not saved:
+                continue
+            rel, original = saved
+            keys.append(encode_file_key(rel, original))
 
     async with async_session() as session:
         product = await crud.create_product(
@@ -102,8 +125,11 @@ async def create_product(
             description=desc or None,
             keys=keys,
             image_path=image_rel,
+            is_infinite=infinite,
         )
         pid = product.id
+    if infinite:
+        return RedirectResponse("/products?ok=infinite", status_code=302)
     if keys:
         return RedirectResponse(f"/products?ok=created_{len(keys)}", status_code=302)
     return RedirectResponse(f"/products/{pid}/keys?new=1", status_code=302)
@@ -166,8 +192,16 @@ async def keys_page(request: Request, product_id: int):
 
 @router.post("/{product_id}/keys")
 async def add_keys(product_id: int, keys_text: str = Form("")):
-    lines = _split_keys(keys_text)
     async with async_session() as session:
+        product = await crud.get_product(session, product_id)
+        if not product:
+            return RedirectResponse("/products", status_code=302)
+        if product.is_infinite:
+            content = (keys_text or "").replace("\r", "").strip()
+            if content:
+                await crud.set_product_static_content(session, product_id, content)
+            return RedirectResponse(f"/products/{product_id}/keys?ok=static", status_code=302)
+        lines = _split_keys(keys_text)
         if lines:
             await crud.add_keys(session, product_id, lines)
     return RedirectResponse(f"/products/{product_id}/keys", status_code=302)
@@ -179,6 +213,31 @@ async def add_key_files(
     delivery_files: list[UploadFile] = File(default=[]),
 ):
     ensure_upload_dirs()
+    async with async_session() as session:
+        product = await crud.get_product(session, product_id)
+        if not product:
+            return RedirectResponse("/products", status_code=302)
+
+        if product.is_infinite:
+            for uf in delivery_files:
+                if not uf or not uf.filename:
+                    continue
+                saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
+                if not saved:
+                    continue
+                rel, original = saved
+                await crud.set_product_static_content(
+                    session, product_id, encode_file_key(rel, original)
+                )
+                return RedirectResponse(
+                    f"/products/{product_id}/keys?ok=static",
+                    status_code=302,
+                )
+            return RedirectResponse(
+                f"/products/{product_id}/keys?err=" + quote("Не удалось загрузить файл"),
+                status_code=302,
+            )
+
     keys: list[str] = []
     for uf in delivery_files:
         if not uf or not uf.filename:

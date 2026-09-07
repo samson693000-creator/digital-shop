@@ -74,6 +74,7 @@ class Product(Base):
     image_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_infinite: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -84,7 +85,22 @@ class Product(Base):
 
     @property
     def available_count(self) -> int:
+        """Для бесконечного: 1 если есть контент, иначе 0. Для обычного — число свободных ключей."""
+        if self.is_infinite:
+            return 1 if self.keys else 0
         return sum(1 for k in self.keys if not k.is_sold)
+
+    @property
+    def stock_label(self) -> str:
+        if self.is_infinite:
+            return "∞" if self.keys else "0"
+        free = self.available_count
+        return f"{free} / {len(self.keys)}"
+
+    @property
+    def in_stock(self) -> bool:
+        return self.available_count > 0
+
 
 
 class ProductKey(Base):

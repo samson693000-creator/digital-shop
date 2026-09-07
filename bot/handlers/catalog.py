@@ -89,15 +89,20 @@ async def open_product(callback: CallbackQuery):
         desc = product.description or "Без описания"
         price = product.price
         image_path = product.image_path
+        infinite = bool(product.is_infinite)
+        in_stock = product.in_stock
 
-    stock_line = f"✅ В наличии: {stock} шт." if stock else "❌ Нет в наличии"
+    if infinite:
+        stock_line = "✅ В наличии: ∞" if in_stock else "❌ Нет контента для выдачи"
+    else:
+        stock_line = f"✅ В наличии: {stock} шт." if stock else "❌ Нет в наличии"
     text = (
         f"📦 <b>{name}</b>\n\n"
         f"{desc}\n\n"
         f"💰 Цена: <b>{price} ₽</b>\n"
         f"{stock_line}"
     )
-    kb = product_actions_kb(product_id, stock > 0)
+    kb = product_actions_kb(product_id, in_stock)
 
     from bot.services.delivery import product_image_abs
     from aiogram.types import FSInputFile

@@ -263,6 +263,7 @@ async def create_product(
     description: str | None = None,
     keys: list[str] | None = None,
     image_path: str | None = None,
+    is_infinite: bool = False,
 ) -> Product:
     product = Product(
         category_id=category_id,
@@ -270,11 +271,15 @@ async def create_product(
         price=price,
         description=description,
         image_path=image_path,
+        is_infinite=bool(is_infinite),
+        is_active=True,
     )
     session.add(product)
     await session.flush()
     if keys:
-        for content in keys:
+        # Для бесконечного — только один постоянный контент
+        to_add = keys[:1] if product.is_infinite else keys
+        for content in to_add:
             content = content.strip()
             if content:
                 session.add(ProductKey(product_id=product.id, content=content))
@@ -288,11 +293,49 @@ async def update_product(session: AsyncSession, product_id: int, **kwargs) -> Pr
     if not product:
         return None
     for k, v in kwargs.items():
-        if hasattr(product, k) and v is not None:
+        if hasattr(product, k):
             setattr(product, k, v)
     await session.commit()
     await session.refresh(product)
     return product
+
+
+async def set_product_static_content(
+    session: AsyncSession, product_id: int, content: str
+) -> bool:
+    """Заменить постоянный контент бесконечного товара одним значением."""
+    product = await get_product(session, product_id)
+    if not product:
+        return False
+    content = (content or "").strip()
+    if not content:
+        return False
+    await session.execute(delete(ProductKey).where(ProductKey.product_id == product_id))
+    session.add(ProductKey(product_id=product_id, content=content, is_sold=False))
+    product.is_active = True
+    await session.commit()
+    return True
+
+
+async def get_static_key(session: AsyncSession, product_id: int) -> ProductKey | None:
+    result = await session.execute(
+        select(ProductKey)
+        .where(ProductKey.product_id == product_id)
+        .order_by(ProductKey.id.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def take_available_key(session: AsyncSession, product_id: int) -> ProductKey | None:
+    result = await session.execute(
+        select(ProductKey)
+        .where(ProductKey.product_id == product_id, ProductKey.is_sold.is_(False))
+        .limit(1)
+        .with_for_update()
+    )
+    key = result.scalar_one_or_none()
+    return key
 
 
 async def delete_product(session: AsyncSession, product_id: int) -> bool:
@@ -330,7 +373,18 @@ async def delete_product(session: AsyncSession, product_id: int) -> bool:
 
 
 async def add_keys(session: AsyncSession, product_id: int, keys: list[str]) -> int:
+    product = await session.get(Product, product_id)
     count = 0
+    if product and product.is_infinite:
+        # Бесконечный: заменить одним контентом
+        content = next((k.strip() for k in keys if k and k.strip()), "")
+        if not content:
+            return 0
+        await session.execute(delete(ProductKey).where(ProductKey.product_id == product_id))
+        session.add(ProductKey(product_id=product_id, content=content, is_sold=False))
+        product.is_active = True
+        await session.commit()
+        return 1
     for content in keys:
         content = content.strip()
         if not content:
@@ -339,17 +393,6 @@ async def add_keys(session: AsyncSession, product_id: int, keys: list[str]) -> i
         count += 1
     await session.commit()
     return count
-
-
-async def take_available_key(session: AsyncSession, product_id: int) -> ProductKey | None:
-    result = await session.execute(
-        select(ProductKey)
-        .where(ProductKey.product_id == product_id, ProductKey.is_sold.is_(False))
-        .limit(1)
-        .with_for_update()
-    )
-    key = result.scalar_one_or_none()
-    return key
 
 
 # ── Orders ───────────────────────────────────────────────────────────────────
@@ -437,16 +480,30 @@ async def complete_order(
     if payment_ref:
         order.payment_ref = payment_ref[:128]
 
-    key = await take_available_key(session, order.product_id)
-    if key is None:
-        order.status = "cancelled"
-        await session.commit()
-        return order
+    product = order.product
+    if product is None:
+        product = await get_product(session, order.product_id)
 
-    key.is_sold = True
-    key.sold_at = datetime.now(timezone.utc)
-    key.order_id = order.id
-    order.delivered_content = key.content
+    if product and product.is_infinite:
+        key = await get_static_key(session, order.product_id)
+        if key is None:
+            order.status = "cancelled"
+            await session.commit()
+            return order
+        # Контент не списывается — ключ остаётся в пуле
+        order.delivered_content = key.content
+        product.is_active = True
+    else:
+        key = await take_available_key(session, order.product_id)
+        if key is None:
+            order.status = "cancelled"
+            await session.commit()
+            return order
+        key.is_sold = True
+        key.sold_at = datetime.now(timezone.utc)
+        key.order_id = order.id
+        order.delivered_content = key.content
+
     order.status = "paid"
     order.paid_at = datetime.now(timezone.utc)
 

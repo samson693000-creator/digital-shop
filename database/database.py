@@ -34,6 +34,10 @@ def _sqlite_add_missing_columns(sync_conn) -> None:
         sync_conn.exec_driver_sql(
             "ALTER TABLE products ADD COLUMN image_path VARCHAR(512)"
         )
+    if "is_infinite" not in product_names:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE products ADD COLUMN is_infinite BOOLEAN DEFAULT 0"
+        )
 
 
 async def init_db() -> None:

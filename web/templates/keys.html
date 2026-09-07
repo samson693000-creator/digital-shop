@@ -2,20 +2,50 @@
 {% block title %}Выдача{% endblock %}
 {% block content %}
 <h1 class="page-title">Выдача · {{ product.name }}</h1>
+{% if product.is_infinite %}
+<p style="color:var(--muted);margin-top:-0.75rem;margin-bottom:1.25rem;">
+  Режим: <b>∞ бесконечный</b> · остаток не уменьшается · одинаковый контент для всех
+</p>
+{% else %}
 <p style="color:var(--muted);margin-top:-0.75rem;margin-bottom:1.25rem;">
   В наличии: {{ available|length }} · Уже выдано: {{ sold|length }}
 </p>
+{% endif %}
 
 {% if is_new %}
 <div class="flash">Товар создан. Добавьте ниже, что получит покупатель после оплаты.</div>
 {% endif %}
-{% if request.query_params.get('ok') and request.query_params.get('ok').startswith('files_') %}
+{% if request.query_params.get('ok') == 'static' %}
+<div class="flash">Постоянный контент сохранён.</div>
+{% elif request.query_params.get('ok') and request.query_params.get('ok').startswith('files_') %}
 <div class="flash">Добавлено файлов: {{ request.query_params.get('ok').split('_')[1] }}</div>
 {% endif %}
 {% if request.query_params.get('err') %}
 <div class="error">{{ request.query_params.get('err') }}</div>
 {% endif %}
 
+{% if product.is_infinite %}
+<div class="panel accent">
+  <h2>Постоянный контент (∞)</h2>
+  <p class="hint">Этот текст/файл уходит каждому покупателю. Остаток не списывается.</p>
+  {% if available %}
+  <p class="mono">Сейчас: {{ key_preview(available[0].content) }}</p>
+  {% else %}
+  <div class="error">Контент ещё не задан — товар нельзя купить.</div>
+  {% endif %}
+  <form method="post" action="/products/{{ product.id }}/keys">
+    <label>Заменить текстом</label>
+    <textarea name="keys_text" placeholder="Ссылка / инструкция / любой текст">{{ available[0].content if available and not available[0].content.startswith('file:') else '' }}</textarea>
+    <button class="btn" type="submit">Сохранить текст</button>
+    <a class="btn" href="/products" style="margin-left:0.5rem;">К списку</a>
+  </form>
+  <form method="post" action="/products/{{ product.id }}/keys/files" enctype="multipart/form-data" style="margin-top:0.75rem">
+    <label>Или заменить файлом</label>
+    <input name="delivery_files" type="file" required />
+    <button class="btn" type="submit">Загрузить файл</button>
+  </form>
+</div>
+{% else %}
 <div class="panel">
   <h2>Текст / ключи</h2>
   <p class="hint">
@@ -71,5 +101,6 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endif %}
 {% endblock %}
