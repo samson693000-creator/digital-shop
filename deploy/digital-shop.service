@@ -9,8 +9,10 @@ WorkingDirectory=/opt/digital-shop
 EnvironmentFile=/opt/digital-shop/.env
 ExecStart=/opt/digital-shop/.venv/bin/python /opt/digital-shop/main.py
 Restart=always
-RestartSec=5
+RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+KillMode=control-group
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target

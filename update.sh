@@ -19,6 +19,21 @@ git -c "safe.directory=${INSTALL_DIR}" reset --hard origin/main
 
 .venv/bin/pip install -r requirements.txt
 chown -R "${APP_USER}:${APP_USER}" "$INSTALL_DIR"
+
+# Кнопка рестарта в админке → systemctl
+cat > "/etc/sudoers.d/${SERVICE_NAME}" <<EOF
+${APP_USER} ALL=(root) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}, /bin/systemctl status ${SERVICE_NAME}, /bin/systemctl is-active ${SERVICE_NAME}
+EOF
+chmod 440 "/etc/sudoers.d/${SERVICE_NAME}"
+
+# Обновим unit, если ставили старый
+if [[ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]]; then
+  if ! grep -q "KillMode=control-group" "/etc/systemd/system/${SERVICE_NAME}.service"; then
+    sed -i '/RestartSec=/a KillMode=control-group\nTimeoutStopSec=15' "/etc/systemd/system/${SERVICE_NAME}.service" || true
+    systemctl daemon-reload
+  fi
+fi
+
 systemctl restart "$SERVICE_NAME"
 systemctl --no-pager --full status "$SERVICE_NAME" | head -n 20
 echo "Обновлено."

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -156,24 +155,43 @@ async def save_bot_settings(
 @router.post("/restart")
 async def restart_service():
     """
-    Перезапуск процесса (бот + админка).
-    Под systemd с Restart=always сервис поднимется сам через несколько секунд.
+    Полный рестарт сервиса digital-shop (бот + админка).
+    Сначала пробуем systemctl (sudoers), иначе жёсткий выход процесса —
+    systemd Restart=always поднимет снова.
     """
 
     async def _shutdown() -> None:
-        await asyncio.sleep(1.5)
-        logger.warning("Admin requested restart — exiting process for systemd reload")
+        await asyncio.sleep(1.0)
+        import subprocess
+
         try:
-            os.kill(os.getpid(), signal.SIGTERM)
-        except Exception:
-            os._exit(0)
+            result = subprocess.run(
+                ["sudo", "-n", "systemctl", "restart", "digital-shop"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                logger.warning("Admin restart via systemctl OK")
+                return
+            logger.warning(
+                "systemctl restart failed (%s): %s — fallback os._exit",
+                result.returncode,
+                (result.stderr or result.stdout or "")[:200],
+            )
+        except Exception as exc:
+            logger.warning("systemctl restart unavailable: %s — fallback os._exit", exc)
+
+        # Жёсткий выход всего процесса (SIGTERM uvicorn иногда гасит только web)
+        logger.warning("Admin requested restart — os._exit(0) for systemd")
+        os._exit(0)
 
     asyncio.create_task(_shutdown())
     return HTMLResponse(
         """<!DOCTYPE html>
 <html lang="ru"><head>
 <meta charset="UTF-8"/>
-<meta http-equiv="refresh" content="8;url=/settings"/>
+<meta http-equiv="refresh" content="10;url=/"/>
 <title>Перезапуск</title>
 <style>
 body{font-family:monospace;background:#050805;color:#c8ffd8;display:grid;place-items:center;min-height:100vh;margin:0}
@@ -183,8 +201,8 @@ a{color:#00ff66}
 </head><body>
 <div class="box">
   <h1>Перезапуск…</h1>
-  <p>Бот и админка перезапускаются.<br>Через 5–10 секунд страница откроется сама.</p>
-  <p><a href="/settings">Открыть настройки</a></p>
+  <p>Бот и админка перезапускаются.<br>Через 8–12 секунд страница откроется сама.</p>
+  <p><a href="/">Открыть админку</a></p>
 </div>
 </body></html>""",
         status_code=200,

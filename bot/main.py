@@ -7,6 +7,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramConflictError, TelegramNetworkError
 
 from bot.handlers import catalog, payment, profile, referral, start
 from database import crud
@@ -32,7 +33,7 @@ async def run_bot() -> None:
     if not token:
         logger.error(
             "BOT_TOKEN не задан. Укажите в админке (Настройки) и подождите, "
-            "либо: systemctl restart digital-shop"
+            "либо нажмите «Рестарт» в меню"
         )
         while not token:
             await asyncio.sleep(5)
@@ -51,9 +52,6 @@ async def run_bot() -> None:
         await bot.session.close()
         raise
 
-    # Иначе polling не получает апдейты, если раньше был webhook
-    await bot.delete_webhook(drop_pending_updates=True)
-
     dp = Dispatcher()
     dp.include_router(start.router)
     dp.include_router(catalog.router)
@@ -61,12 +59,30 @@ async def run_bot() -> None:
     dp.include_router(profile.router)
     dp.include_router(referral.router)
 
-    logger.info("Telegram bot polling started")
     from bot.services.payment_watch import watch_pending_payments
 
     watcher = asyncio.create_task(watch_pending_payments(bot))
     try:
-        await dp.start_polling(bot)
+        # После рестарта Telegram иногда ещё держит старый getUpdates — ждём и пробуем
+        for attempt in range(1, 12):
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Telegram bot polling started (try %s)", attempt)
+                await dp.start_polling(bot, handle_signals=False)
+                break
+            except TelegramConflictError:
+                wait = min(2 * attempt, 15)
+                logger.warning(
+                    "Telegram getUpdates conflict (try %s), wait %ss",
+                    attempt,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+            except TelegramNetworkError:
+                logger.warning("Telegram network error, retry in 5s")
+                await asyncio.sleep(5)
+        else:
+            raise RuntimeError("Не удалось запустить polling: Telegram conflict")
     finally:
         watcher.cancel()
         try:

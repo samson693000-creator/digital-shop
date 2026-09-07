@@ -110,10 +110,18 @@ ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/main.py
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+KillMode=control-group
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Чтобы кнопка «Рестарт» в админке могла перезапустить сервис целиком
+cat > "/etc/sudoers.d/${SERVICE_NAME}" <<EOF
+${APP_USER} ALL=(root) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}, /bin/systemctl status ${SERVICE_NAME}, /bin/systemctl is-active ${SERVICE_NAME}
+EOF
+chmod 440 "/etc/sudoers.d/${SERVICE_NAME}"
 
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
@@ -144,6 +152,6 @@ echo "────────────────────────�
 echo
 echo "Дальше:"
 echo "  1) Откройте админку → Настройки → вставьте BOT_TOKEN"
-echo "  2) systemctl restart ${SERVICE_NAME}"
+echo "  2) В меню слева нажмите «↻ Рестарт»"
 echo "  3) (опционально) nginx + HTTPS перед портом ${APP_PORT}"
 echo

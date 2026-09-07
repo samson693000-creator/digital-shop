@@ -19,12 +19,18 @@ logger = logging.getLogger("main")
 
 
 async def start_bot():
+    """Бот крутится в цикле: если упал (conflict и т.п.) — поднимаем снова."""
     from bot.main import run_bot
 
-    try:
-        await run_bot()
-    except Exception:
-        logger.exception("Bot crashed")
+    while True:
+        try:
+            await run_bot()
+            logger.warning("Bot polling stopped cleanly, restarting in 3s")
+        except Exception:
+            logger.exception("Bot crashed, restarting in 5s")
+            await asyncio.sleep(5)
+            continue
+        await asyncio.sleep(3)
 
 
 async def start_web():
@@ -36,6 +42,8 @@ async def start_web():
         reload=False,
     )
     server = uvicorn.Server(config)
+    # Не перехватываем сигналы сами — иначе SIGTERM гасит только web, а процесс живёт
+    server.install_signal_handlers = False
     await server.serve()
 
 

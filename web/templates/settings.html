@@ -4,7 +4,7 @@
 <h1 class="page-title">Настройки</h1>
 
 {% if request.query_params.get('saved') == 'bot' %}
-<div class="flash">Сохранено. Если меняли токен бота — нажмите «Перезапустить бота» ниже.</div>
+<div class="flash">Сохранено. Если меняли токен бота — нажмите «↻ Рестарт» слева в меню.</div>
 {% elif request.query_params.get('saved') %}
 <div class="flash">Сохранено</div>
 {% endif %}
@@ -14,14 +14,6 @@
 <div class="flash">✅ {{ oauth_ok }}</div>
 {% endif %}
 {% if oauth_err %}<div class="error">{{ oauth_err }}</div>{% endif %}
-
-<div class="panel accent">
-  <h2>Сервис</h2>
-  <p class="hint">Перезапускает бота и админку (через systemd поднимется сам).</p>
-  <form method="post" action="/settings/restart" onsubmit="return confirm('Перезапустить бота и админку сейчас?')">
-    <button class="btn" type="submit">Перезапустить бота</button>
-  </form>
-</div>
 
 <div class="panel">
   <h2>Бот</h2>
