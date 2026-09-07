@@ -16,7 +16,7 @@ from database.database import async_session
 
 logger = logging.getLogger(__name__)
 
-POLL_SEC = 20
+POLL_SEC = 12
 MAX_AGE = timedelta(hours=36)
 
 
@@ -49,13 +49,20 @@ async def _scan_once(bot: Bot) -> None:
             if method == "yoomoney":
                 if not (pay.yoomoney_token or "").strip():
                     continue
-                ok, _reason, op_id = await check_operation_by_label(
+                ok, reason, op_id = await check_operation_by_label(
                     token=pay.yoomoney_token or "",
                     label=order.external_id or "",
                     expected_amount=Decimal(str(order.amount)),
                     used_ids=used,
                     created_at=order.created_at,
                 )
+                if not ok and reason == "oauth_forbidden":
+                    logger.error(
+                        "YooMoney token missing operation-history — "
+                        "re-authorize in admin settings (order #%s)",
+                        order.id,
+                    )
+                    continue
                 paid = ok
                 ref = op_id or None
             elif method == "usdt" and order.payment_amount and pay.usdt_trc20_wallet:

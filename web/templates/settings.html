@@ -9,7 +9,7 @@
 <div class="flash">Сохранено</div>
 {% endif %}
 {% if oauth_ok == 'ok' %}
-<div class="flash">✅ Токен ЮMoney получен и работает</div>
+<div class="flash">✅ Токен ЮMoney получен и работает (включая историю)</div>
 {% elif oauth_ok %}
 <div class="flash">✅ {{ oauth_ok }}</div>
 {% endif %}
@@ -37,8 +37,10 @@
 <div class="panel accent" id="ym">
   <h2>ЮMoney — получить токен</h2>
   <p class="hint">
-    Ошибка <b>invalid_request</b> бывает, если Redirect URI = http://IP — ЮMoney это запрещает.<br>
-    В приложении ЮMoney укажите Redirect URI <b>точно</b>:
+    Без права <b>operation-history</b> бот <b>не увидит</b> оплату, даже если деньги пришли.<br>
+    В <a href="https://yoomoney.ru/myservices" target="_blank" rel="noopener">приложении ЮMoney</a>
+    включите: <b>account-info</b>, <b>operation-history</b>, <b>operation-details</b>.<br>
+    Redirect URI <b>точно</b>:
     <code id="redir">{{ yoomoney_redirect }}</code>
     <button class="btn btn-sm" type="button" id="copy-redir">копировать</button>
   </p>
@@ -48,18 +50,21 @@
       {% if has_oauth_token %}
       <div class="flash" style="margin:0">Токен есть · {{ pay.yoomoney_token|length }} симв.</div>
       {% else %}
-      <div class="error" style="margin:0">Токена нет</div>
+      <div class="error" style="margin:0">Токена нет — автопроверка ЮMoney не работает</div>
       {% endif %}
     </div>
     <div>
       <form method="post" action="/settings/yoomoney/test-token">
         <input type="hidden" name="yoomoney_token" value="" />
-        <button class="btn" type="submit" style="width:100%">Проверить API</button>
+        <button class="btn" type="submit" style="width:100%">Проверить API + историю</button>
       </form>
     </div>
   </div>
 
-  <p class="hint"><b>Шаг A.</b> Client ID → открыть ЮMoney → войти / SMS</p>
+  <p class="hint">
+    <b>Шаг A.</b> Client ID → открыть ЮMoney → войти / SMS →
+    <b>разрешить ВСЕ права</b> (особенно историю операций)
+  </p>
   <form method="post" action="/settings/yoomoney/prepare">
     <label>Client ID</label>
     <input name="client_id" value="{{ yoomoney_client_id }}" required />

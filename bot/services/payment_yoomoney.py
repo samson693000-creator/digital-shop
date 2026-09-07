@@ -12,9 +12,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Карта ЮMoney обычно берёт ~3% с получателя (50 ₽ → 48,50 ₽).
-YM_MIN_RATIO = Decimal("0.90")
-YM_MAX_OVER = Decimal("0.50")
+# Карта ЮMoney: ~3% с получателя (50 ₽ → 48,50 ₽). Запас шире на всякий случай.
+YM_MIN_RATIO = Decimal("0.85")
+YM_MAX_OVER = Decimal("1.00")
+
+OAUTH_SCOPES = "account-info operation-history operation-details"
 
 
 def make_label() -> str:
@@ -37,7 +39,8 @@ def yoomoney_amount_ok(expected: Decimal, received: Decimal, *, labeled: bool = 
         return False
     if exp <= 0 or got <= 0:
         return False
-    min_ok = (exp * (Decimal("0.80") if labeled else YM_MIN_RATIO)).quantize(Decimal("0.01"))
+    min_ratio = Decimal("0.75") if labeled else YM_MIN_RATIO
+    min_ok = (exp * min_ratio).quantize(Decimal("0.01"))
     max_ok = exp + YM_MAX_OVER
     return min_ok <= got <= max_ok
 
@@ -80,35 +83,67 @@ def verify_notification(data: dict, notification_secret: str) -> bool:
 
 
 async def validate_oauth_token(token: str) -> tuple[bool, str]:
-    """Call account-info to verify token. Returns (ok, message)."""
+    """
+    Verify token can read account AND operation-history.
+    account-info alone is not enough for payment checks.
+    """
     token = clean_oauth_token(token)
     if not token:
         return False, "Токен пустой"
     if len(token) < 40:
         return False, f"Токен слишком короткий ({len(token)} симв.) — похоже, вставлен не access_token"
 
+    headers = {"Authorization": f"Bearer {token}"}
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             resp = await client.post(
                 "https://yoomoney.ru/api/account-info",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
             )
             body = resp.text[:300]
             if resp.status_code == 401:
                 return False, "401 — токен неверный или отозван. Получите заново через OAuth."
             if resp.status_code == 403:
-                return False, "403 — нет прав. При авторизации нужны account-info и operation-history."
+                return False, "403 — нет права account-info. Получите токен заново и разрешите все права."
             if resp.status_code >= 400:
                 return False, f"HTTP {resp.status_code}: {body}"
             data = resp.json()
+            if data.get("error"):
+                return False, f"Ошибка API: {data.get('error')}"
+
+            account = data.get("account") or data.get("account_number") or "?"
+
+            # Критично: без истории бот не найдёт оплату
+            hist = await client.post(
+                "https://yoomoney.ru/api/operation-history",
+                headers=headers,
+                data={"records": 1, "type": "deposition"},
+            )
+            if hist.status_code == 401:
+                return False, "401 — токен неверный при чтении истории. Получите заново."
+            if hist.status_code == 403:
+                return (
+                    False,
+                    "НЕТ ПРАВА operation-history. В приложении ЮMoney включите "
+                    "«Просмотр истории операций», затем снова: Открыть авторизацию → "
+                    "разрешить ВСЕ права → обменять code.",
+                )
+            if hist.status_code >= 400:
+                return False, f"История HTTP {hist.status_code}: {hist.text[:200]}"
+            hist_data = hist.json()
+            if hist_data.get("error"):
+                err = str(hist_data.get("error"))
+                if "forbidden" in err.lower() or "scope" in err.lower():
+                    return (
+                        False,
+                        "Нет права operation-history. Перевыпустите токен и отметьте "
+                        "просмотр истории операций.",
+                    )
+                return False, f"История: {err}"
     except Exception as exc:
         return False, f"Сеть: {exc}"
 
-    if data.get("error"):
-        return False, f"Ошибка API: {data.get('error')}"
-
-    account = data.get("account") or data.get("account_number") or "?"
-    return True, f"OK · кошелёк API: {account} · длина токена: {len(token)}"
+    return True, f"OK · кошелёк {account} · история доступна · токен {len(token)} симв."
 
 
 def _op_text(op: dict) -> str:
@@ -136,6 +171,34 @@ def _op_id(op: dict) -> str:
     return str(op.get("operation_id") or op.get("operationId") or "")
 
 
+def _op_amount(op: dict) -> Decimal | None:
+    for key in ("amount", "amount_due", "sum"):
+        if op.get(key) is None:
+            continue
+        try:
+            val = Decimal(str(op.get(key)))
+            if val > 0:
+                return val
+        except Exception:
+            continue
+    return None
+
+
+def _is_incoming(op: dict) -> bool:
+    direction = str(op.get("direction") or "").lower()
+    if direction in ("out",):
+        return False
+    if direction in ("in",):
+        return True
+    op_type = str(op.get("type") or "").lower()
+    if op_type in ("payment", "out"):
+        return False
+    if op_type in ("deposition", "incoming", "in"):
+        return True
+    # неизвестный тип — пробуем как входящий, если сумма > 0
+    return True
+
+
 def _match_operation(
     operations: list,
     *,
@@ -146,13 +209,13 @@ def _match_operation(
 ) -> tuple[bool, str, str]:
     label = (label or "").strip()
     label_l = label.lower()
-    created_utc = None
+    created_ts = None
     if created_at is not None:
-        created_utc = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-        created_utc = created_utc.timestamp() - 180  # 3 мин запас на рассинхрон часов
+        aware = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        created_ts = aware.timestamp() - 300  # 5 мин запас
 
-    labeled: list[tuple[Decimal, dict]] = []
-    unlabeled: list[tuple[Decimal, dict]] = []
+    labeled: list[tuple[float, Decimal, dict]] = []
+    unlabeled: list[tuple[float, Decimal, dict]] = []
 
     for op in operations:
         oid = _op_id(op)
@@ -161,39 +224,43 @@ def _match_operation(
         status = op.get("status")
         if status not in (None, "success", "done"):
             continue
-        direction = str(op.get("direction") or op.get("type") or "")
-        if direction in ("out", "payment"):
+        if not _is_incoming(op):
             continue
-        try:
-            amount = Decimal(str(op.get("amount", 0)))
-        except Exception:
-            continue
-        if amount <= 0:
+        amount = _op_amount(op)
+        if amount is None:
             continue
 
         op_dt = _parse_op_dt(op)
-        if created_utc is not None and op_dt is not None:
-            ts = op_dt.timestamp() if op_dt.tzinfo else op_dt.replace(tzinfo=timezone.utc).timestamp()
-            if ts < created_utc:
+        sort_ts = 0.0
+        if op_dt is not None:
+            sort_ts = op_dt.timestamp() if op_dt.tzinfo else op_dt.replace(tzinfo=timezone.utc).timestamp()
+            if created_ts is not None and sort_ts < created_ts:
                 continue
 
         text = _op_text(op)
         op_label = str(op.get("label") or "").strip()
-        has_label = bool(label) and (op_label == label or (label_l and label_l in text))
+        has_label = bool(label) and (
+            op_label == label
+            or (label_l and label_l in text)
+            or (label_l and label_l in op_label.lower())
+        )
         if has_label:
             if yoomoney_amount_ok(expected_amount, amount, labeled=True):
-                labeled.append((amount, op))
-        else:
-            unlabeled.append((amount, op))
+                labeled.append((sort_ts, amount, op))
+        elif yoomoney_amount_ok(expected_amount, amount, labeled=False):
+            # Чем ближе сумма к ожидаемой — тем лучше
+            diff = abs(amount - expected_amount)
+            unlabeled.append((diff, amount, op))
 
     if labeled:
-        _amt, op = labeled[0]
+        labeled.sort(key=lambda x: x[0])  # раньше по времени
+        _ts, _amt, op = labeled[0]
         return True, "ok", _op_id(op)
 
-    # Без метки: сумма с учётом комиссии (50 → 48.50)
-    for amount, op in unlabeled:
-        if yoomoney_amount_ok(expected_amount, amount, labeled=False):
-            return True, "ok_amount", _op_id(op)
+    if unlabeled:
+        unlabeled.sort(key=lambda x: (x[0], x[1]))  # ближе к сумме
+        _diff, _amt, op = unlabeled[0]
+        return True, "ok_amount", _op_id(op)
 
     return False, "not_found", ""
 
@@ -201,7 +268,7 @@ def _match_operation(
 async def _fetch_history(token: str, extra: dict) -> tuple[list, str | None]:
     url = "https://yoomoney.ru/api/operation-history"
     headers = {"Authorization": f"Bearer {token}"}
-    payload = {"records": 40, "details": "true", **extra}
+    payload = {"records": "50", **extra}
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             resp = await client.post(url, headers=headers, data=payload)
@@ -216,8 +283,11 @@ async def _fetch_history(token: str, extra: dict) -> tuple[list, str | None]:
         return [], "api_error"
 
     if data.get("error"):
-        logger.warning("YooMoney API error: %s", data.get("error"))
-        return [], f"api_{data.get('error')}"
+        err = str(data.get("error"))
+        logger.warning("YooMoney API error: %s", err)
+        if "forbidden" in err.lower():
+            return [], "oauth_forbidden"
+        return [], f"api_{err}"
     return list(data.get("operations") or []), None
 
 
@@ -232,15 +302,16 @@ async def check_operation_by_label(
     token = clean_oauth_token(token)
     if not token:
         return False, "no_oauth_token", ""
-    if not label and expected_amount <= 0:
-        return False, "no_label", ""
+    if expected_amount <= 0:
+        return False, "no_amount", ""
 
     used = used_ids or set()
     ops: list = []
     last_err: str | None = None
 
-    queries = []
+    queries: list[dict] = []
     if label:
+        queries.append({"label": label})
         queries.append({"label": label, "type": "deposition"})
     queries.append({"type": "deposition"})
     queries.append({})
@@ -250,11 +321,11 @@ async def check_operation_by_label(
         chunk, err = await _fetch_history(token, q)
         if err and not chunk:
             last_err = err
-            if err in ("oauth_unauthorized", "oauth_forbidden", "api_error"):
+            if err in ("oauth_unauthorized", "oauth_forbidden"):
                 return False, err, ""
             continue
         for op in chunk:
-            oid = _op_id(op) or str(id(op))
+            oid = _op_id(op) or f"anon:{id(op)}"
             if oid in seen:
                 continue
             seen.add(oid)

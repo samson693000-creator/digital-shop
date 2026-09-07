@@ -9,7 +9,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import URLSafeSerializer
 
-from bot.services.payment_yoomoney import clean_oauth_token, validate_oauth_token
+from bot.services.payment_yoomoney import (
+    OAUTH_SCOPES,
+    clean_oauth_token,
+    validate_oauth_token,
+)
 from config import settings as app_settings
 from database import crud
 from database.database import async_session
@@ -59,7 +63,7 @@ def _auth_url(client_id: str, state: str) -> str:
             "client_id": client_id,
             "response_type": "code",
             "redirect_uri": YOOMONEY_REDIRECT_URI,
-            "scope": "account-info operation-history",
+            "scope": OAUTH_SCOPES,
             "state": state,
         }
     )
@@ -235,8 +239,14 @@ async def exchange_yoomoney_code(
         await crud.update_payment_settings(session, yoomoney_token=token)
 
     if ok:
-        return RedirectResponse("/settings?oauth=ok#ym", status_code=302)
+        return RedirectResponse(
+            "/settings?oauth=" + quote(msg[:120]) + "#ym",
+            status_code=302,
+        )
+    # Токен сохранён, но без истории оплаты не найдутся — явно сообщаем
     return RedirectResponse(
-        "/settings?oauth_err=" + quote("Сохранён, проверка: " + msg[:80]) + "#ym",
+        "/settings?oauth_err="
+        + quote("Токен сохранён, но проверка не прошла: " + msg[:140])
+        + "#ym",
         status_code=302,
     )
