@@ -76,7 +76,20 @@ python main.py
 - Кошельки USDT / ЮMoney, реферальный %
 - Заказы, статистика, пользователи
 
-## ЮMoney webhook
+## ЮMoney — автопроверка оплаты
+
+Кнопка «Проверить» и автосканер читают историю через OAuth API.
+
+1. В [приложении ЮMoney](https://yoomoney.ru/myservices) включите права:
+   `account-info`, `operation-history`, `operation-details`
+2. Redirect URI: `https://yoomoney.ru`
+3. Админка → Настройки → получить токен (разрешить **все** права при входе)
+4. Нажмите **Проверить API + историю** — должно быть `история доступна`
+5. В разделе **Заказы** можно нажать «Проверить pending ЮMoney / USDT сейчас»
+
+Без права `operation-history` деньги на кошелёк приходят, но бот платёж не видит.
+
+Webhook (опционально, нужен HTTPS):
 
 `https://YOUR_PUBLIC_DOMAIN/api/yoomoney/notify`
 

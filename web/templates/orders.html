@@ -7,11 +7,13 @@
 <div class="flash">Оплата подтверждена, товар выдан в Telegram.</div>
 {% elif flash == 'already' %}
 <div class="flash">Заказ уже был оплачен.</div>
+{% elif flash %}
+<div class="flash">{{ flash }}</div>
 {% endif %}
 {% if error == 'deliver' %}
 <div class="error">Не удалось выдать (нет ключей или ошибка). Проверьте остаток товара.</div>
 {% elif error %}
-<div class="error">Ошибка: {{ error }}</div>
+<div class="error">{{ error }}</div>
 {% endif %}
 
 <div class="grid-stats">
@@ -26,6 +28,12 @@
 </div>
 
 <div class="panel">
+  <form method="post" action="/orders/check-payments" style="margin-bottom:0.85rem">
+    <button class="btn" type="submit">Проверить pending ЮMoney / USDT сейчас</button>
+  </form>
+  <p class="hint">
+    Если пишет про <b>operation-history</b> — перевыпустите токен в Настройках и разрешите историю операций.
+  </p>
   <table>
     <thead>
       <tr>
@@ -53,9 +61,16 @@
         <td>{% if o.delivered_content %}<code>{{ o.delivered_content[:40] }}{% if o.delivered_content|length > 40 %}…{% endif %}</code>{% else %}—{% endif %}</td>
         <td>
           {% if o.status == 'pending' %}
-          <form class="inline" method="post" action="/orders/{{ o.id }}/confirm" onsubmit="return confirm('Деньги пришли? Выдать товар покупателю?')">
-            <button class="btn btn-sm" type="submit">Подтвердить</button>
-          </form>
+          <div class="btn-row">
+            {% if o.payment_method in ('yoomoney', 'usdt') %}
+            <form class="inline" method="post" action="/orders/{{ o.id }}/check">
+              <button class="btn btn-sm" type="submit">API</button>
+            </form>
+            {% endif %}
+            <form class="inline" method="post" action="/orders/{{ o.id }}/confirm" onsubmit="return confirm('Деньги пришли? Выдать товар покупателю?')">
+              <button class="btn btn-sm" type="submit">Подтвердить</button>
+            </form>
+          </div>
           {% endif %}
         </td>
       </tr>
