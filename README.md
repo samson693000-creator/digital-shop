@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/samson693000-creator/digital-shop/m
 curl -fsSL https://raw.githubusercontent.com/samson693000-creator/digital-shop/main/install.sh | sudo bash -s -- --port 8080 --dir /opt/digital-shop
 ```
 
-После установки откройте админку → **Настройки** → вставьте `BOT_TOKEN` → `systemctl restart digital-shop`.
+После установки откройте админку → **Настройки** → вставьте `BOT_TOKEN` → нажмите **Перезапустить бота**.
 
 Обновление (уже установленный сервер):
 

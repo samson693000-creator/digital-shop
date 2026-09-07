@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+import signal
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -21,6 +25,7 @@ from database.database import async_session
 router = APIRouter(prefix="/settings")
 templates = Jinja2Templates(directory="web/templates")
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+logger = logging.getLogger(__name__)
 
 DEFAULT_PUBLIC_BASE = "http://213.108.3.100:8000"
 
@@ -146,6 +151,44 @@ async def save_bot_settings(
         await crud.set_setting(session, "welcome_text", welcome_text.strip())
     _sync_env_bot_token(token)
     return RedirectResponse("/settings?saved=bot", status_code=302)
+
+
+@router.post("/restart")
+async def restart_service():
+    """
+    Перезапуск процесса (бот + админка).
+    Под systemd с Restart=always сервис поднимется сам через несколько секунд.
+    """
+
+    async def _shutdown() -> None:
+        await asyncio.sleep(1.5)
+        logger.warning("Admin requested restart — exiting process for systemd reload")
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            os._exit(0)
+
+    asyncio.create_task(_shutdown())
+    return HTMLResponse(
+        """<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8"/>
+<meta http-equiv="refresh" content="8;url=/settings"/>
+<title>Перезапуск</title>
+<style>
+body{font-family:monospace;background:#050805;color:#c8ffd8;display:grid;place-items:center;min-height:100vh;margin:0}
+.box{border:1px solid #00ff66;padding:1.5rem 2rem;max-width:28rem;text-align:center}
+a{color:#00ff66}
+</style>
+</head><body>
+<div class="box">
+  <h1>Перезапуск…</h1>
+  <p>Бот и админка перезапускаются.<br>Через 5–10 секунд страница откроется сама.</p>
+  <p><a href="/settings">Открыть настройки</a></p>
+</div>
+</body></html>""",
+        status_code=200,
+    )
 
 
 @router.post("/payments")

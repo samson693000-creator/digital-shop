@@ -21,6 +21,9 @@
         <a href="/orders" class="{{ 'active' if page == 'orders' else '' }}">Заказы</a>
         <a href="/users" class="{{ 'active' if page == 'users' else '' }}">Пользователи</a>
         <a href="/settings" class="{{ 'active' if page == 'settings' else '' }}">Настройки</a>
+        <form method="post" action="/settings/restart" style="margin:0.55rem 0 0" onsubmit="return confirm('Перезапустить бота?')">
+          <button class="btn btn-sm" type="submit" style="width:100%">↻ Рестарт</button>
+        </form>
         <a href="/logout">Выход</a>
       </nav>
     </aside>
