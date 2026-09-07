@@ -262,12 +262,14 @@ async def create_product(
     price: Decimal,
     description: str | None = None,
     keys: list[str] | None = None,
+    image_path: str | None = None,
 ) -> Product:
     product = Product(
         category_id=category_id,
         name=name,
         price=price,
         description=description,
+        image_path=image_path,
     )
     session.add(product)
     await session.flush()

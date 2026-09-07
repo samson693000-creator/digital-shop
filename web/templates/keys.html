@@ -9,16 +9,31 @@
 {% if is_new %}
 <div class="flash">Товар создан. Добавьте ниже, что получит покупатель после оплаты.</div>
 {% endif %}
+{% if request.query_params.get('ok') and request.query_params.get('ok').startswith('files_') %}
+<div class="flash">Добавлено файлов: {{ request.query_params.get('ok').split('_')[1] }}</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+<div class="error">{{ request.query_params.get('err') }}</div>
+{% endif %}
 
 <div class="panel">
-  <h2>Что получит покупатель</h2>
+  <h2>Текст / ключи</h2>
   <p class="hint">
-    Один ключ / логин:пароль / ссылка / любой текст — на строку. При покупке уходит случайная свободная строка.
+    Один ключ / логин:пароль / ссылка / любой текст — на строку. При покупке уходит одна свободная позиция.
   </p>
   <form method="post" action="/products/{{ product.id }}/keys">
-    <textarea name="keys_text" placeholder="login:password&#10;KEY-1111&#10;https://disk.example/file" required></textarea>
-    <button class="btn" type="submit">Добавить в выдачу</button>
+    <textarea name="keys_text" placeholder="login:password&#10;KEY-1111&#10;https://disk.example/file"></textarea>
+    <button class="btn" type="submit">Добавить текст</button>
     <a class="btn" href="/products" style="margin-left:0.5rem;">К списку товаров</a>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Файлы на выдачу</h2>
+  <p class="hint">Фото, txt, pdf, zip и др. Каждый файл = 1 продажа. Покупатель получит файл в Telegram.</p>
+  <form method="post" action="/products/{{ product.id }}/keys/files" enctype="multipart/form-data">
+    <input name="delivery_files" type="file" multiple required />
+    <button class="btn" type="submit">Загрузить файлы</button>
   </form>
 </div>
 
@@ -30,7 +45,7 @@
       {% for k in available %}
       <tr>
         <td>{{ k.id }}</td>
-        <td><code>{{ k.content }}</code></td>
+        <td><code>{{ key_preview(k.content) }}</code></td>
         <td>
           <form class="inline" method="post" action="/products/{{ product.id }}/keys/{{ k.id }}/delete" onsubmit="return confirm('Удалить эту позицию?')">
             <button class="btn btn-sm btn-danger" type="submit">Удалить</button>
@@ -51,7 +66,7 @@
     <thead><tr><th>ID</th><th>Контент</th></tr></thead>
     <tbody>
       {% for k in sold %}
-      <tr><td>{{ k.id }}</td><td><code>{{ k.content }}</code></td></tr>
+      <tr><td>{{ k.id }}</td><td><code>{{ key_preview(k.content) }}</code></td></tr>
       {% endfor %}
     </tbody>
   </table>

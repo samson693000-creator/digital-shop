@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from database.database import init_db
 from web.auth import SESSION_COOKIE, load_session_token
 from web.routes import auth, dashboard, orders, products, settings
+from web.uploads import UPLOADS_DIR, ensure_upload_dirs
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -22,6 +23,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         public = (
             path.startswith("/static")
+            or path.startswith("/uploads")
             or path in ("/login", "/api/yoomoney/notify")
         )
         if public:
@@ -37,8 +39,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
+    ensure_upload_dirs()
     app = FastAPI(title="Digital Shop Admin", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
     app.add_middleware(AuthMiddleware)
 
     app.include_router(auth.router)

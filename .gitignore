@@ -2,6 +2,7 @@
 .env
 data/*.db
 data/*.db-*
+data/uploads/
 __pycache__/
 *.pyc
 .venv/

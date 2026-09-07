@@ -88,6 +88,7 @@ async def open_product(callback: CallbackQuery):
         name = product.name
         desc = product.description or "Без описания"
         price = product.price
+        image_path = product.image_path
 
     stock_line = f"✅ В наличии: {stock} шт." if stock else "❌ Нет в наличии"
     text = (
@@ -96,7 +97,26 @@ async def open_product(callback: CallbackQuery):
         f"💰 Цена: <b>{price} ₽</b>\n"
         f"{stock_line}"
     )
-    await callback.message.edit_text(
-        text, reply_markup=product_actions_kb(product_id, stock > 0)
-    )
+    kb = product_actions_kb(product_id, stock > 0)
+
+    from bot.services.delivery import product_image_abs
+    from aiogram.types import FSInputFile
+
+    img = product_image_abs(image_path)
+    try:
+        if img:
+            # edit_text не умеет картинку — удаляем и шлём фото
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer_photo(
+                photo=FSInputFile(str(img)),
+                caption=text,
+                reply_markup=kb,
+            )
+        else:
+            await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb)
     await callback.answer()

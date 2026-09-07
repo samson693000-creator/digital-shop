@@ -1,15 +1,28 @@
 from decimal import Decimal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from database import crud
 from database.database import async_session
 from database.models import ProductKey
+from web.uploads import (
+    DELIVERY_DIR,
+    DELIVERY_EXTS,
+    IMAGE_EXTS,
+    PRODUCT_IMAGES_DIR,
+    encode_file_key,
+    ensure_upload_dirs,
+    key_preview,
+    read_txt_bytes,
+    save_upload,
+)
 
 router = APIRouter(prefix="/products")
 templates = Jinja2Templates(directory="web/templates")
+templates.env.globals["key_preview"] = key_preview
 
 
 def _split_keys(keys_text: str) -> list[str]:
@@ -45,16 +58,50 @@ async def create_product(
     price: float = Form(...),
     description: str = Form(""),
     keys_text: str = Form(""),
+    image: UploadFile | None = File(None),
+    description_file: UploadFile | None = File(None),
+    delivery_files: list[UploadFile] = File(default=[]),
 ):
+    ensure_upload_dirs()
+    desc = (description or "").strip()
+
+    # Описание из .txt (поверх поля, если файл не пустой)
+    if description_file and description_file.filename:
+        raw = await description_file.read()
+        if raw:
+            from_file = read_txt_bytes(raw)
+            if from_file:
+                desc = from_file
+
+    image_rel = None
+    if image and image.filename:
+        saved = await save_upload(image, PRODUCT_IMAGES_DIR, allowed=IMAGE_EXTS)
+        if not saved:
+            return RedirectResponse(
+                "/products?err=" + quote("Фото: только jpg/png/webp/gif до 25 МБ"),
+                status_code=302,
+            )
+        image_rel, _ = saved
+
     keys = _split_keys(keys_text)
+    for uf in delivery_files or []:
+        if not uf or not uf.filename:
+            continue
+        saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
+        if not saved:
+            continue
+        rel, original = saved
+        keys.append(encode_file_key(rel, original))
+
     async with async_session() as session:
         product = await crud.create_product(
             session,
             category_id=category_id,
             name=name.strip(),
             price=Decimal(str(price)),
-            description=description.strip() or None,
+            description=desc or None,
             keys=keys,
+            image_path=image_rel,
         )
         pid = product.id
     if keys:
@@ -118,11 +165,40 @@ async def keys_page(request: Request, product_id: int):
 
 
 @router.post("/{product_id}/keys")
-async def add_keys(product_id: int, keys_text: str = Form(...)):
+async def add_keys(product_id: int, keys_text: str = Form("")):
     lines = _split_keys(keys_text)
     async with async_session() as session:
-        await crud.add_keys(session, product_id, lines)
+        if lines:
+            await crud.add_keys(session, product_id, lines)
     return RedirectResponse(f"/products/{product_id}/keys", status_code=302)
+
+
+@router.post("/{product_id}/keys/files")
+async def add_key_files(
+    product_id: int,
+    delivery_files: list[UploadFile] = File(default=[]),
+):
+    ensure_upload_dirs()
+    keys: list[str] = []
+    for uf in delivery_files:
+        if not uf or not uf.filename:
+            continue
+        saved = await save_upload(uf, DELIVERY_DIR, allowed=DELIVERY_EXTS)
+        if not saved:
+            continue
+        rel, original = saved
+        keys.append(encode_file_key(rel, original))
+    if keys:
+        async with async_session() as session:
+            await crud.add_keys(session, product_id, keys)
+        return RedirectResponse(
+            f"/products/{product_id}/keys?ok=files_{len(keys)}",
+            status_code=302,
+        )
+    return RedirectResponse(
+        f"/products/{product_id}/keys?err=" + quote("Не удалось загрузить файлы"),
+        status_code=302,
+    )
 
 
 @router.post("/{product_id}/keys/{key_id}/delete")
@@ -172,8 +248,6 @@ async def create_category(
 
 @router.post("/categories/{category_id}/delete")
 async def delete_category(category_id: int):
-    from urllib.parse import quote
-
     async with async_session() as session:
         ok, reason = await crud.delete_category(session, category_id)
     if ok:

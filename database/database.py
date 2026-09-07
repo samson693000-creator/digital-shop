@@ -21,11 +21,18 @@ DEFAULT_SETTINGS = {
 
 
 def _sqlite_add_missing_columns(sync_conn) -> None:
-    rows = sync_conn.exec_driver_sql("PRAGMA table_info(orders)").fetchall()
-    names = {r[1] for r in rows}
-    if "payment_ref" not in names:
+    order_rows = sync_conn.exec_driver_sql("PRAGMA table_info(orders)").fetchall()
+    order_names = {r[1] for r in order_rows}
+    if "payment_ref" not in order_names:
         sync_conn.exec_driver_sql(
             "ALTER TABLE orders ADD COLUMN payment_ref VARCHAR(128)"
+        )
+
+    product_rows = sync_conn.exec_driver_sql("PRAGMA table_info(products)").fetchall()
+    product_names = {r[1] for r in product_rows}
+    if "image_path" not in product_names:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE products ADD COLUMN image_path VARCHAR(512)"
         )
 
 
