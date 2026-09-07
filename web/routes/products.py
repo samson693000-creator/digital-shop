@@ -135,6 +135,19 @@ async def create_product(
     return RedirectResponse(f"/products/{pid}/keys?new=1", status_code=302)
 
 
+@router.post("/{product_id}/price")
+async def update_product_price(product_id: int, price: float = Form(...)):
+    if price < 0:
+        return RedirectResponse("/products?err=" + quote("Цена не может быть отрицательной"), status_code=302)
+    async with async_session() as session:
+        ok = await crud.update_product(
+            session, product_id, price=Decimal(str(price))
+        )
+    if not ok:
+        return RedirectResponse("/products?err=not_found", status_code=302)
+    return RedirectResponse("/products?ok=price", status_code=302)
+
+
 @router.post("/{product_id}/update")
 async def update_product(
     product_id: int,
@@ -154,7 +167,7 @@ async def update_product(
             description=description.strip(),
             is_active=is_active == "on",
         )
-    return RedirectResponse("/products", status_code=302)
+    return RedirectResponse("/products?ok=updated", status_code=302)
 
 
 @router.post("/{product_id}/delete")

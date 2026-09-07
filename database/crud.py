@@ -125,6 +125,14 @@ async def list_users(session: AsyncSession, limit: int = 100) -> list[User]:
     return list(result.scalars().all())
 
 
+async def list_broadcast_targets(session: AsyncSession) -> list[int]:
+    """Telegram IDs активных пользователей для рассылки."""
+    result = await session.execute(
+        select(User.telegram_id).where(User.is_active.is_(True)).order_by(User.id.asc())
+    )
+    return [int(x) for x in result.scalars().all()]
+
+
 async def add_balance(session: AsyncSession, user_id: int, amount: Decimal) -> User:
     user = await session.get(User, user_id)
     if user is None:

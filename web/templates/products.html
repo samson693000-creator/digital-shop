@@ -5,6 +5,10 @@
 
 {% if flash == 'deleted' %}
 <div class="flash">Товар удалён.</div>
+{% elif flash == 'price' %}
+<div class="flash">Цена обновлена. В боте уже новая сумма.</div>
+{% elif flash == 'updated' %}
+<div class="flash">Товар обновлён.</div>
 {% elif flash == 'infinite' %}
 <div class="flash">Бесконечный товар создан — один и тот же контент для всех покупателей.</div>
 {% elif flash and flash.startswith('created_') %}
@@ -109,7 +113,12 @@
         <td>{{ p.id }}</td>
         <td>{{ p.name }}</td>
         <td>{{ p.category.name if p.category else "—" }}</td>
-        <td>{{ p.price }}</td>
+        <td>
+          <form class="inline" method="post" action="/products/{{ p.id }}/price" style="display:flex;gap:0.35rem;align-items:center;margin:0">
+            <input name="price" type="number" step="0.01" min="0" value="{{ p.price }}" required style="width:6.5rem;margin:0;padding:0.35rem 0.4rem" />
+            <button class="btn btn-sm" type="submit">OK</button>
+          </form>
+        </td>
         <td>{{ p.stock_label }}</td>
         <td>{% if p.is_infinite %}∞{% else %}штучный{% endif %}</td>
         <td>{{ "да" if p.is_active else "нет" }}</td>

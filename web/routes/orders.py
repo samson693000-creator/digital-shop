@@ -1,7 +1,7 @@
 from decimal import Decimal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -242,10 +242,75 @@ async def check_one_order(order_id: int):
 async def users_page(request: Request):
     async with async_session() as session:
         users = await crud.list_users(session, limit=500)
+        targets = await crud.list_broadcast_targets(session)
     return templates.TemplateResponse(
         "users.html",
-        {"request": request, "users": users, "page": "users"},
+        {
+            "request": request,
+            "users": users,
+            "page": "users",
+            "broadcast_count": len(targets),
+            "flash": request.query_params.get("ok"),
+            "error": request.query_params.get("err"),
+        },
     )
+
+
+@router.post("/broadcast")
+async def broadcast_message(text: str = Form(...)):
+    """Рассылка сообщения всем активным пользователям бота."""
+    import asyncio
+
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+
+    body = (text or "").strip()
+    if not body:
+        return RedirectResponse(
+            "/users?err=" + quote("Пустое сообщение"),
+            status_code=302,
+        )
+    if len(body) > 4000:
+        return RedirectResponse(
+            "/users?err=" + quote("Слишком длинное сообщение (макс. 4000)"),
+            status_code=302,
+        )
+
+    async with async_session() as session:
+        bot_token = await crud.get_setting(session, "bot_token", "")
+        targets = await crud.list_broadcast_targets(session)
+
+    if not (bot_token or "").strip():
+        return RedirectResponse(
+            "/users?err=" + quote("Не задан токен бота в Настройках"),
+            status_code=302,
+        )
+    if not targets:
+        return RedirectResponse(
+            "/users?err=" + quote("Нет пользователей для рассылки"),
+            status_code=302,
+        )
+
+    bot = Bot(
+        token=bot_token.strip(),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    ok = 0
+    fail = 0
+    try:
+        for tg_id in targets:
+            try:
+                await bot.send_message(tg_id, body, disable_web_page_preview=True)
+                ok += 1
+            except Exception:
+                fail += 1
+            await asyncio.sleep(0.05)
+    finally:
+        await bot.session.close()
+
+    msg = f"Рассылка: доставлено {ok}, ошибок {fail}, всего {len(targets)}"
+    return RedirectResponse("/users?ok=" + quote(msg), status_code=302)
 
 
 @router.post("/api/yoomoney/notify")

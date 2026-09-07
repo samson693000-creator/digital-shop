@@ -3,7 +3,28 @@
 {% block content %}
 <h1 class="page-title">Пользователи</h1>
 
+{% if flash %}
+<div class="flash">{{ flash }}</div>
+{% endif %}
+{% if error %}
+<div class="error">{{ error }}</div>
+{% endif %}
+
+<div class="panel accent">
+  <h2>Рассылка в бот</h2>
+  <p class="hint">
+    Сообщение уйдёт всем активным пользователям (сейчас: <b>{{ broadcast_count }}</b>).
+    Можно использовать HTML: <code>&lt;b&gt;жирный&lt;/b&gt;</code>, <code>&lt;i&gt;курсив&lt;/i&gt;</code>, <code>&lt;code&gt;код&lt;/code&gt;</code>.
+  </p>
+  <form method="post" action="/broadcast" onsubmit="return confirm('Отправить рассылку {{ broadcast_count }} пользователям?')">
+    <label>Текст сообщения</label>
+    <textarea name="text" required placeholder="Новый товар в каталоге!&#10;Загляните в 🛒 Каталог"></textarea>
+    <button class="btn" type="submit">Отправить рассылку</button>
+  </form>
+</div>
+
 <div class="panel">
+  <h2>Список</h2>
   <table>
     <thead>
       <tr>
