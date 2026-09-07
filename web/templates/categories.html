@@ -3,6 +3,15 @@
 {% block content %}
 <h1 class="page-title">Категории</h1>
 
+{% if flash == 'deleted' %}
+<div class="flash">Категория удалена</div>
+{% elif flash == 'created' %}
+<div class="flash">Категория добавлена</div>
+{% elif flash %}
+<div class="flash">{{ flash }}</div>
+{% endif %}
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
 <div class="panel">
   <h2>Новая категория / подкатегория</h2>
   <form method="post" action="/products/categories/create">
@@ -31,6 +40,7 @@
 
 <div class="panel">
   <h2>Список</h2>
+  <p class="hint">Если в категории есть товары — сначала удалите их в разделе «Товары».</p>
   <table>
     <thead>
       <tr><th>ID</th><th>Название</th><th>Родитель</th><th>Активна</th><th></th></tr>
@@ -43,7 +53,7 @@
         <td>{{ c.parent_id or "—" }}</td>
         <td>{{ "да" if c.is_active else "нет" }}</td>
         <td>
-          <form class="inline" method="post" action="/products/categories/{{ c.id }}/delete" onsubmit="return confirm('Удалить?')">
+          <form class="inline" method="post" action="/products/categories/{{ c.id }}/delete" onsubmit="return confirm('Удалить категорию?')">
             <button class="btn btn-sm btn-danger" type="submit">Удалить</button>
           </form>
         </td>

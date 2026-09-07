@@ -141,7 +141,13 @@ async def categories_page(request: Request):
         categories = await crud.list_all_categories(session)
     return templates.TemplateResponse(
         "categories.html",
-        {"request": request, "categories": categories, "page": "categories"},
+        {
+            "request": request,
+            "categories": categories,
+            "page": "categories",
+            "flash": request.query_params.get("ok"),
+            "error": request.query_params.get("err"),
+        },
     )
 
 
@@ -161,11 +167,21 @@ async def create_category(
             parent_id=parent,
             sort_order=sort_order,
         )
-    return RedirectResponse("/products/categories/manage", status_code=302)
+    return RedirectResponse("/products/categories/manage?ok=created", status_code=302)
 
 
 @router.post("/categories/{category_id}/delete")
 async def delete_category(category_id: int):
+    from urllib.parse import quote
+
     async with async_session() as session:
-        await crud.delete_category(session, category_id)
-    return RedirectResponse("/products/categories/manage", status_code=302)
+        ok, reason = await crud.delete_category(session, category_id)
+    if ok:
+        return RedirectResponse("/products/categories/manage?ok=deleted", status_code=302)
+    messages = {
+        "not_found": "Категория не найдена",
+        "has_products": "Сначала удалите или перенесите товары из этой категории",
+        "fk_error": "Не удалось удалить (есть связанные данные)",
+    }
+    err = quote(messages.get(reason, reason))
+    return RedirectResponse(f"/products/categories/manage?err={err}", status_code=302)

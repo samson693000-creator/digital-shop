@@ -198,13 +198,38 @@ async def update_category(session: AsyncSession, category_id: int, **kwargs) -> 
     return cat
 
 
-async def delete_category(session: AsyncSession, category_id: int) -> bool:
+async def delete_category(session: AsyncSession, category_id: int) -> tuple[bool, str]:
+    """
+    Удалить категорию.
+    Подкатегории поднимаются на уровень родителя.
+    Если есть товары — отказ (сначала удалите/перенесите товары).
+    """
     cat = await session.get(Category, category_id)
     if not cat:
-        return False
+        return False, "not_found"
+
+    products_count = (
+        await session.execute(
+            select(func.count(Product.id)).where(Product.category_id == category_id)
+        )
+    ).scalar() or 0
+    if products_count:
+        return False, "has_products"
+
+    # Подкатегории → тот же parent, что был у удаляемой (или корень)
+    await session.execute(
+        update(Category)
+        .where(Category.parent_id == category_id)
+        .values(parent_id=cat.parent_id)
+    )
+
     await session.delete(cat)
-    await session.commit()
-    return True
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        return False, "fk_error"
+    return True, "ok"
 
 
 # ── Products ─────────────────────────────────────────────────────────────────
