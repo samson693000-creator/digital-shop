@@ -1,3 +1,3 @@
-from . import catalog, payment, profile, referral, start
+from . import catalog, payment, profile, referral, start, support
 
-__all__ = ["start", "catalog", "payment", "profile", "referral"]
+__all__ = ["start", "catalog", "payment", "profile", "referral", "support"]

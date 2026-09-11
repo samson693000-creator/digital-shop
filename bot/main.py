@@ -8,8 +8,9 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramConflictError, TelegramNetworkError
+from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.handlers import catalog, payment, profile, referral, start
+from bot.handlers import catalog, payment, profile, referral, start, support
 from database import crud
 from database.database import async_session, init_db
 
@@ -52,7 +53,8 @@ async def run_bot() -> None:
         await bot.session.close()
         raise
 
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(support.router)
     dp.include_router(start.router)
     dp.include_router(catalog.router)
     dp.include_router(payment.router)
